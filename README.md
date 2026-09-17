@@ -28,21 +28,6 @@ reboot is needed to switch applications.
 - [License](#license)
 
 ---
-
-## Status
-
-Preliminary — bring-up in progress on ZCU102 rev 1.0.
-
-| Component       | State        |
-|:----------------|:-------------|
-| Base bitstream  | working      |
-| TDC bitstream   | in bring-up  |
-| CT bitstream    | in bring-up  |
-| PetaLinux image | working      |
-| Host collector  | working      |
-
----
-
 ## Hardware
 
 - Board: ZCU102 rev 1.0
