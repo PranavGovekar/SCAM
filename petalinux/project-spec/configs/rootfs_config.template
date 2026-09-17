@@ -1,0 +1,22 @@
+#
+# SCAM rootfs config template.
+# 'make petalinux-config' copies this to rootfs_config.
+#
+CONFIG_packagegroup-petalinux=y
+CONFIG_packagegroup-petalinux-networking=y
+
+# SSH + sudo
+CONFIG_openssh-sshd=y
+CONFIG_openssh-sftp-server=y
+CONFIG_sudo=y
+
+# Python for quick scripting on target
+CONFIG_python3=y
+CONFIG_python3-modules=y
+
+# Utilities
+CONFIG_dosfstools=y
+CONFIG_e2fsprogs=y
+CONFIG_util-linux-mount=y
+CONFIG_procps=y
+CONFIG_devmem2=y

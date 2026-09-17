@@ -1,0 +1,24 @@
+#
+# SCAM PetaLinux config template.
+# 'make petalinux-config' copies this to config and then runs
+# petalinux-config --get-hw-description, which fills in the hardware
+# derived fragments below.
+#
+CONFIG_SUBSYSTEM_MACHINE_NAME="zcu102-rev1.0"
+CONFIG_SUBSYSTEM_PRODUCT="zcu102_rev1_0"
+CONFIG_SUBSYSTEM_HOSTNAME="scam-zcu102"
+
+# Networking
+CONFIG_SUBSYSTEM_ETHERNET_PSU_ETHERNET_0_MAC="00:0a:35:00:01:02"
+
+# Root filesystem type
+CONFIG_SUBSYSTEM_ROOTFS_EXT4=y
+
+# Boot
+CONFIG_SUBSYSTEM_BOOTARGS=""
+
+# Enable FPGA manager
+CONFIG_SUBSYSTEM_FPGA_MANAGER=y
+
+# Kernel: enable DMA and FPGA manager
+CONFIG_SUBSYSTEM_KERNEL_FEATURES=""

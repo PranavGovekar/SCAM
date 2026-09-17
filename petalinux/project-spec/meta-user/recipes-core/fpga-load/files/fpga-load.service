@@ -1,0 +1,14 @@
+[Unit]
+Description=SCAM FPGA bitstream load
+DefaultDependencies=no
+After=sysinit.target
+Before=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/fpga-application.conf
+ExecStart=/bin/sh -c 'test -x $FPGAUTIL && $FPGAUTIL -b /lib/firmware/${FPGA_DEFAULT}.bit.bin || true'
+
+[Install]
+WantedBy=multi-user.target

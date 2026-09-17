@@ -1,0 +1,30 @@
+# Vivado
+*.jou
+*.log
+.Xil/
+vivado*.str
+vivado*.zip
+build/
+hw/base/build/
+hw/tdc/build/
+hw/ct/build/
+
+# PetaLinux
+petalinux/build/
+petalinux/.petalinux/
+petalinux/images/
+petalinux/components/
+
+# Build outputs
+out/
+*.o
+*.elf
+*.bin
+!petalinux/project-spec/meta-user/recipes-bsp/fpga-bitstreams/files/*.bin
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

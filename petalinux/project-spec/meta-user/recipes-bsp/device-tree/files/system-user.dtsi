@@ -1,0 +1,19 @@
+/*
+ * SCAM device tree additions.
+ *
+ * Deliberately empty for PL side.
+ *
+ * Rationale: the userspace applications access PL peripherals through
+ * /dev/mem. There are no kernel drivers bound to AXI GPIOs or the AXI DMA.
+ * This is what allows runtime bitstream swap without a reboot.
+ *
+ * If you ever want to add a PL peripheral with a kernel driver, add it
+ * here AND remove it from the "PL contract" in docs/pl-contract.md.
+ * But be aware: a bound kernel driver will hang the bus when the PL is
+ * reconfigured underneath it.
+ */
+
+/ {
+    model = "SCAM ZCU102 Platform";
+    compatible = "xlnx,zynqmp-zcu102-rev1.0", "xlnx,zynqmp";
+};
