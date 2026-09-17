@@ -1,6 +1,6 @@
 # SCAM
 
-**S**o **C**an **A**nyone **M**ake-this-work?
+### <u>**S**</u>o, <u>**C**</u>an <u>**A**</u>nyone <u>**M**</u>ake-this-work?
 
 Modular FPGA + PetaLinux platform for physics DAQ on the **Xilinx ZCU102**
 (Zynq UltraScale+ XCZU9EG). Two application bitstreams share one Linux
