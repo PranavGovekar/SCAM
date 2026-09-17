@@ -1,6 +1,6 @@
 # SCAM
 
-So Can Anyone Make-this-work.
+**S**o **C**an **A**nyone **M**ake-this-work?
 
 Modular FPGA + PetaLinux platform for physics DAQ on the **Xilinx ZCU102**
 (Zynq UltraScale+ XCZU9EG). Two application bitstreams share one Linux
