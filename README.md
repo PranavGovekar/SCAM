@@ -17,7 +17,6 @@ reboot is needed to switch applications.
 
 ## Table of contents
 
-- [Status](#status)
 - [Hardware](#hardware)
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
