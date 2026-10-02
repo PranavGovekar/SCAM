@@ -37,7 +37,6 @@ set_property IOSTANDARD LVDS [get_ports diff_in_p_1]
 set_property PACKAGE_PIN M13 [get_ports diff_in_n_1]
 set_property IOSTANDARD LVDS [get_ports diff_in_n_1]
 set_property DIFF_TERM_ADV TERM_100 [get_ports diff_in_p_1]
-set_property DIFF_TERM_ADV TERM_100 [get_ports diff_in_n_1]
 
 # Channel control pins: oe = output enable, term = termination enable
 set_property PACKAGE_PIN V6  [get_ports {oe[0]}]
@@ -68,9 +67,13 @@ create_clock -period 10.000 -name hit_1_clk [get_ports diff_in_p_1]
 set_clock_groups -asynchronous -group [get_clocks hit_0_clk]
 set_clock_groups -asynchronous -group [get_clocks hit_1_clk]
 
-# B. Relax timing across the 100MHz/400MHz boundaries (manual synchronizers).
-set_max_delay -datapath_only -from [get_clocks pl_clk0]      -to [get_clocks clk_fast_400] 10.0
-set_max_delay -datapath_only -from [get_clocks clk_fast_400] -to [get_clocks pl_clk0]      10.0
+# B. Relax timing across the 100MHz/400MHz boundary (manual synchronizers).
+# Clock names are obtained from the actual PS and MMCM pins in the generated
+# Vivado design; the old pl_clk0/clk_fast_400 names did not exist in this run.
+set clk_sys [get_clocks clk_pl_0]
+set clk_fast [get_clocks -of_objects [get_pins -hier -filter {NAME =~ */mmcme4_adv_inst/CLKOUT0}]]
+set_max_delay -datapath_only -from $clk_sys  -to $clk_fast 10.0
+set_max_delay -datapath_only -from $clk_fast -to $clk_sys  10.0
 
 # =============================================================================
 # 3. TDL PHYSICAL PLACEMENT (PBLOCKS)
@@ -106,4 +109,4 @@ set_property IS_SOFT false [get_pblocks pblock_ch1_stop]
 # 4. ASYNCHRONOUS HIT ROUTING CONSTRAINTS
 # =============================================================================
 # Prevent Vivado from routing the raw hits onto global clock trees.
-set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -hierarchical -filter {NAME =~ *hit_i*}]
+set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -hierarchical -filter {NAME =~ *u_tdc_top/hit_i*}]

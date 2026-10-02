@@ -4,20 +4,30 @@
 # Run: vivado -mode batch -source build_base_xsa.tcl
 # =============================================================================
 
-set proj_name  "scam_base"
+set script_dir [file dirname [file normalize [info script]]]
+set template_only [expr {[info exists ::SCAM_TEMPLATE_ONLY] && $::SCAM_TEMPLATE_ONLY}]
+set proj_name "scam_base"
 set bd_name    "base"
 set part       "xczu9eg-ffvb1156-2-e"
-set out_dir    "."
+set build_dir  [file normalize [expr {[info exists ::env(SCAM_BUILD_DIR)] ? $::env(SCAM_BUILD_DIR) : [file join $script_dir build ${proj_name}_project]}]]
+set project_file [file join $build_dir ${proj_name}.xpr]
+set project_exists [file exists $project_file]
+if {[info exists ::env(SCAM_REBUILD_TEMPLATE)] && $::env(SCAM_REBUILD_TEMPLATE)} {
+    set project_exists 0
+}
 
-# Clean previous
-file delete -force ./build
-file delete -force ./${proj_name}.xpr
-file delete -force ./${proj_name}.srcs
-file delete -force ./${proj_name}.gen
+if {!$project_exists} {
+    # Create the editable template only when one is not already present. This
+    # preserves changes made in the Vivado GUI when users rebuild the XSA.
+    file delete -force $build_dir
 
-create_project ${proj_name} ./build -part ${part} -force
+    create_project ${proj_name} $build_dir -part ${part} -force
 
-set_property board_part xilinx.com:zcu102:part0:3.4 [current_project]
+    set_property board_part xilinx.com:zcu102:part0:3.4 [current_project]
+    set idle_source [file join $script_dir src axis_idle_source.vhd]
+    add_files -norecurse $idle_source
+    set_property file_type VHDL [get_files $idle_source]
+    update_compile_order -fileset sources_1
 
 # -----------------------------------------------------------------------------
 # Block design
@@ -36,6 +46,7 @@ apply_bd_automation -rule xilinx.com:bd_rule:zynq_ultra_ps_e     -config {apply_
 # we lock in the essential ones and disable what we don't want.
 set_property -dict [list \
     CONFIG.PSU__USE__M_AXI_GP0 {1} \
+    CONFIG.PSU__USE__M_AXI_GP1 {0} \
     CONFIG.PSU__USE__S_AXI_GP0 {0} \
     CONFIG.PSU__USE__S_AXI_GP1 {0} \
     CONFIG.PSU__USE__S_AXI_GP2 {1} \
@@ -60,7 +71,7 @@ set_property -dict [list \
     CONFIG.PSU__GPIO1_MIO__PERIPHERAL__ENABLE {1} \
     CONFIG.PSU__USB0__PERIPHERAL__ENABLE {0} \
     CONFIG.PSU__USB3_0__PERIPHERAL__ENABLE {0} \
-    CONFIG.PSU__DP__PERIPHERAL__ENABLE {0} \
+    CONFIG.PSU__DISPLAYPORT__PERIPHERAL__ENABLE {0} \
     CONFIG.PSU__PCIE__PERIPHERAL__ENABLE {0} \
     CONFIG.PSU__SATA__PERIPHERAL__ENABLE {0} \
 ] $ps
@@ -82,7 +93,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_0
 
 # -- AXI interconnect ---------------------------------------------------------
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 ps8_0_axi_periph
-set_property -dict [list CONFIG.NUM_MI {5}] [get_bd_cells ps8_0_axi_periph]
+set_property -dict [list CONFIG.NUM_MI {6}] [get_bd_cells ps8_0_axi_periph]
 
 # -- AXI DMA (S2MM only) ------------------------------------------------------
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_0
@@ -94,9 +105,9 @@ set_property -dict [list \
     CONFIG.c_s2mm_burst_size {256} \
     CONFIG.c_s_axis_s2mm_tdata_width {128} \
     CONFIG.c_m_axi_s2mm_data_width {128} \
-    CONFIG.c_s2mm_len_width {26} \
     CONFIG.c_addr_width {40} \
 ] [get_bd_cells axi_dma_0]
+create_bd_cell -type module -reference axis_idle_source idle_axis_source
 
 # -- AXI GPIOs ----------------------------------------------------------------
 # Control: 2-bit output
@@ -142,16 +153,6 @@ set_property -dict [list \
 ] [get_bd_cells axi_gpio_flags]
 
 # -----------------------------------------------------------------------------
-# Address map
-# -----------------------------------------------------------------------------
-assign_bd_address -offset 0xA0000000 -range 64K [get_bd_addr_segs axi_dma_0/S_AXI_LITE/Reg]
-assign_bd_address -offset 0xA0010000 -range 64K [get_bd_addr_segs axi_gpio_ctrl/S_AXI/Reg]
-assign_bd_address -offset 0xA0020000 -range 64K [get_bd_addr_segs axi_gpio_status/S_AXI/Reg]
-assign_bd_address -offset 0xA0030000 -range 64K [get_bd_addr_segs axi_gpio_config/S_AXI/Reg]
-assign_bd_address -offset 0xA0040000 -range 64K [get_bd_addr_segs axi_gpio_status2/S_AXI/Reg]
-assign_bd_address -offset 0xA0050000 -range 64K [get_bd_addr_segs axi_gpio_flags/S_AXI/Reg]
-
-# -----------------------------------------------------------------------------
 # Connections
 # -----------------------------------------------------------------------------
 # Clocks
@@ -163,6 +164,7 @@ connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_clk0] \
     [get_bd_pins ps8_0_axi_periph/M02_ACLK] \
     [get_bd_pins ps8_0_axi_periph/M03_ACLK] \
     [get_bd_pins ps8_0_axi_periph/M04_ACLK] \
+    [get_bd_pins ps8_0_axi_periph/M05_ACLK] \
     [get_bd_pins axi_dma_0/s_axi_lite_aclk] \
     [get_bd_pins axi_dma_0/m_axi_s2mm_aclk] \
     [get_bd_pins axi_gpio_ctrl/s_axi_aclk] \
@@ -172,11 +174,32 @@ connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_clk0] \
     [get_bd_pins axi_gpio_flags/s_axi_aclk] \
     [get_bd_pins clk_wiz_0/clk_in1] \
     [get_bd_pins zynq_ultra_ps_e_0/maxihpm0_fpd_aclk] \
-    [get_bd_pins zynq_ultra_ps_e_0/saxihpc0_fpd_aclk]
+    [get_bd_pins zynq_ultra_ps_e_0/saxihp0_fpd_aclk]
+connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_clk0] \
+    [get_bd_pins idle_axis_source/aclk]
 
-# Reset
-connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_resetn0] \
-    [get_bd_pins proc_sys_reset_0/ext_reset_in]
+# Set the clock wizard input frequency from the configured PS clock.
+set freq_hz [get_property CONFIG.FREQ_HZ [get_bd_pins zynq_ultra_ps_e_0/pl_clk0]]
+set_property CONFIG.PRIM_IN_FREQ [expr {$freq_hz / 1000000.0}] [get_bd_cells clk_wiz_0]
+
+connect_bd_intf_net [get_bd_intf_pins idle_axis_source/M_AXIS] \
+    [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM]
+
+# Control GPIO bit 1 is active-low reset release. Combine it with the PS reset
+# so software can reset application logic using the fixed PL contract.
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlslice:1.0 slice_ctrl_reset_n
+set_property -dict [list CONFIG.DIN_WIDTH {2} CONFIG.DIN_FROM {1} CONFIG.DIN_TO {1} CONFIG.DOUT_WIDTH {1}] [get_bd_cells slice_ctrl_reset_n]
+connect_bd_net [get_bd_pins axi_gpio_ctrl/gpio_io_o] [get_bd_pins slice_ctrl_reset_n/Din]
+create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 reset_n_and
+set_property -dict [list CONFIG.C_OPERATION {and} CONFIG.C_SIZE {1}] [get_bd_cells reset_n_and]
+connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_resetn0] [get_bd_pins reset_n_and/Op1]
+connect_bd_net [get_bd_pins slice_ctrl_reset_n/Dout] [get_bd_pins reset_n_and/Op2]
+connect_bd_net [get_bd_pins reset_n_and/Res] [get_bd_pins proc_sys_reset_0/ext_reset_in]
+connect_bd_net [get_bd_pins zynq_ultra_ps_e_0/pl_clk0] \
+    [get_bd_pins proc_sys_reset_0/slowest_sync_clk]
+create_bd_cell -type ip -vlnv xilinx.com:ip:xlconstant:1.1 const_dcm_locked
+set_property -dict [list CONFIG.CONST_WIDTH {1} CONFIG.CONST_VAL {1}] [get_bd_cells const_dcm_locked]
+connect_bd_net [get_bd_pins const_dcm_locked/dout] [get_bd_pins proc_sys_reset_0/dcm_locked]
 connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
     [get_bd_pins ps8_0_axi_periph/ARESETN] \
     [get_bd_pins ps8_0_axi_periph/S00_ARESETN] \
@@ -185,6 +208,7 @@ connect_bd_net [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
     [get_bd_pins ps8_0_axi_periph/M02_ARESETN] \
     [get_bd_pins ps8_0_axi_periph/M03_ARESETN] \
     [get_bd_pins ps8_0_axi_periph/M04_ARESETN] \
+    [get_bd_pins ps8_0_axi_periph/M05_ARESETN] \
     [get_bd_pins axi_dma_0/axi_resetn] \
     [get_bd_pins axi_gpio_ctrl/s_axi_aresetn] \
     [get_bd_pins axi_gpio_status/s_axi_aresetn] \
@@ -201,32 +225,52 @@ connect_bd_intf_net [get_bd_intf_pins ps8_0_axi_periph/M02_AXI] [get_bd_intf_pin
 connect_bd_intf_net [get_bd_intf_pins ps8_0_axi_periph/M03_AXI] [get_bd_intf_pins axi_gpio_config/S_AXI]
 connect_bd_intf_net [get_bd_intf_pins ps8_0_axi_periph/M04_AXI] [get_bd_intf_pins axi_gpio_status2/S_AXI]
 
-# NOTE: axi_gpio_flags shares M02 with status in this draft. Adjust NUM_MI
-# to 6 and add M05 in a follow-up edit if you want a dedicated interconnect
-# port. For the current scope we share M02 via a second interconnect level
-# is overkill -- instead, increase NUM_MI below.
-
-set_property -dict [list CONFIG.NUM_MI {6}] [get_bd_cells ps8_0_axi_periph]
 connect_bd_intf_net [get_bd_intf_pins ps8_0_axi_periph/M05_AXI] [get_bd_intf_pins axi_gpio_flags/S_AXI]
+connect_bd_intf_net [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] \
+    [get_bd_intf_pins zynq_ultra_ps_e_0/S_AXI_HP0_FPD]
+
+# The DMA S2MM master may access PS DDR only. Explicitly map both DDR address
+# segments and exclude unrelated QSPI/OCM windows from this master.
+set dma_address_space [get_bd_addr_spaces axi_dma_0/Data_S2MM]
+assign_bd_address -target_address_space $dma_address_space [get_bd_addr_segs zynq_ultra_ps_e_0/SAXIGP2/HP0_DDR_LOW]
+assign_bd_address -target_address_space $dma_address_space [get_bd_addr_segs zynq_ultra_ps_e_0/SAXIGP2/HP0_DDR_HIGH]
+exclude_bd_addr_seg -target_address_space $dma_address_space [get_bd_addr_segs zynq_ultra_ps_e_0/SAXIGP2/HP0_QSPI]
+exclude_bd_addr_seg -target_address_space $dma_address_space [get_bd_addr_segs zynq_ultra_ps_e_0/SAXIGP2/HP0_LPS_OCM]
+
+# Assign addresses only after all six slaves are connected to the PS master.
+assign_bd_address -offset 0xA0000000 -range 64K [get_bd_addr_segs axi_dma_0/S_AXI_LITE/Reg]
+assign_bd_address -offset 0xA0010000 -range 64K [get_bd_addr_segs axi_gpio_ctrl/S_AXI/Reg]
+assign_bd_address -offset 0xA0020000 -range 64K [get_bd_addr_segs axi_gpio_status/S_AXI/Reg]
+assign_bd_address -offset 0xA0030000 -range 64K [get_bd_addr_segs axi_gpio_config/S_AXI/Reg]
+assign_bd_address -offset 0xA0040000 -range 64K [get_bd_addr_segs axi_gpio_status2/S_AXI/Reg]
+assign_bd_address -offset 0xA0050000 -range 64K [get_bd_addr_segs axi_gpio_flags/S_AXI/Reg]
 
 # DMA interrupt
 connect_bd_net [get_bd_pins axi_dma_0/s2mm_introut] \
     [get_bd_pins zynq_ultra_ps_e_0/pl_ps_irq0]
 
+} else {
+    open_project $project_file
+    open_bd_design [get_files -all ${bd_name}.bd]
+}
+
 # -----------------------------------------------------------------------------
-# Wrap up
+# Validate, save, and wrap the editable template.
 # -----------------------------------------------------------------------------
 regenerate_bd_layout
 validate_bd_design
 save_bd_design
-
 make_wrapper -files [get_files ${bd_name}.bd] -top
-add_files -norecurse ./build/${proj_name}.srcs/sources_1/bd/${bd_name}/hdl/${bd_name}_wrapper.v
+set wrapper_file [file join $build_dir ${proj_name}.gen sources_1 bd ${bd_name} hdl ${bd_name}_wrapper.v]
+if {[llength [get_files -quiet $wrapper_file]] == 0} {
+    add_files -norecurse $wrapper_file
+}
 set_property top ${bd_name}_wrapper [current_fileset]
-
-# Export XSA. The path is intentionally empty -- a script wrapper copies the
-# resulting file into the PetaLinux hw-description directory.
 generate_target all [get_files ${bd_name}.bd]
-write_hw_platform -fixed -include_bit -force -file ./${bd_name}.xsa
 
-puts "XSA written to: ./${bd_name}.xsa"
+if {!$template_only} {
+    # Export hardware metadata for PetaLinux without packaging a bitstream.
+    set xsa_file [file normalize [expr {[info exists ::env(SCAM_XSA_OUTPUT)] ? $::env(SCAM_XSA_OUTPUT) : [file join $script_dir system.xsa]}]]
+    write_hw_platform -fixed -force -file $xsa_file
+    puts "XSA written to: $xsa_file"
+}

@@ -1,6 +1,8 @@
 # Vivado
 *.jou
 *.log
+*.xsa
+*.bit
 .Xil/
 vivado*.str
 vivado*.zip
@@ -8,15 +10,39 @@ build/
 hw/base/build/
 hw/tdc/build/
 hw/ct/build/
+hw/ct/ct.bif
+hw/tdc/tdc.bif
 
 # PetaLinux
 petalinux/build/
 petalinux/.petalinux/
 petalinux/images/
 petalinux/components/
+petalinux/project-spec/configs/config
+petalinux/project-spec/configs/config.old
+petalinux/project-spec/configs/rootfs_config
+petalinux/project-spec/configs/rootfs_config.old
+petalinux/project-spec/configs/.statistics
+petalinux/project-spec/configs/plnx_syshw_data
+petalinux/project-spec/configs/attributes
+petalinux/project-spec/configs/*.old
+petalinux/project-spec/configs/*.log
+petalinux/project-spec/configs/*.log.*
+petalinux/project-spec/configs/configs/
+petalinux/project-spec/configs/busybox/
+petalinux/project-spec/configs/init-ifupdown/
+petalinux/project-spec/configs/rootfsconfigs/
+petalinux/project-spec/configs/flash_parts.txt
+petalinux/project-spec/attributes
+petalinux/project-spec/hw-description/psu_init*.*
+petalinux/project-spec/meta-user/recipes-apps/yeet-data-common/files/*.c
+petalinux/project-spec/meta-user/recipes-apps/yeet-data-common/files/*.h
+petalinux/project-spec/meta-user/recipes-apps/yeet-data-tdc/files/*.c
+petalinux/project-spec/meta-user/recipes-apps/yeet-data-ct/files/*.c
 
 # Build outputs
 out/
+.cache/
 *.o
 *.elf
 *.bin
@@ -28,3 +54,4 @@ out/
 *.swp
 .DS_Store
 Thumbs.db
+petalinux/project-spec/meta-user/recipes-bsp/fpga-bitstreams/files/*.bit.bin

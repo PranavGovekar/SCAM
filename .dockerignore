@@ -1,0 +1,14 @@
+.git
+.cache
+out
+hw/base/build
+hw/ct/build
+hw/tdc/build
+petalinux/build
+petalinux/components
+petalinux/images
+*.jou
+*.log
+*.bit
+*.bit.bin
+*.xsa

@@ -19,6 +19,7 @@ entity tdc_top is
         fifo_overflow_count_o : out std_logic_vector(31 downto 0);
 
         m_axis_tdata  : out std_logic_vector(127 downto 0);
+        m_axis_tkeep  : out std_logic_vector(15 downto 0);
         m_axis_tvalid : out std_logic;
         m_axis_tready : in  std_logic;
         m_axis_tlast  : out std_logic
@@ -54,6 +55,9 @@ architecture rtl of tdc_top is
     signal state : state_t := S_POLL;
 
 begin
+
+    -- Each TDC word fills all 16 byte lanes; TLAST delimits the packet.
+    m_axis_tkeep <= (others => '1');
 
     process(clk_fast_i)
         variable any_overflow : std_logic;

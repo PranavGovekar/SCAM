@@ -1,11 +1,14 @@
 # Coincidence Trigger Application
 
-Layers on top of the base block design. Adds:
+An independent Vivado project cloned from the editable base Vivado project.
+It preserves the base PS/PL contract and adds:
 
 - 4x differential input pairs (SMA)
 - 4x `diff_to_se_1ch`
 - `ct_top` (glue + wrapper for `four_fold_coincidence`)
-- LED routing
+
+The four differential inputs use FMC DIO 5ch channels 0–3 on ZCU102 HPC0.
+The remaining HPC0 input is unused, and HPC1 is not used.
 
 AXI footprint: unchanged from base. All configuration goes through
 `axi_gpio_config`, all readout through `axi_gpio_status` /

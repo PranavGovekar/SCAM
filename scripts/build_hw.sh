@@ -5,13 +5,15 @@ set -euo pipefail
 # Usage: build_hw.sh <base|tdc|ct>
 
 target="${1:-}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
 case "${target}" in
     base)
         echo "==> Building base XSA"
         pushd hw/base > /dev/null
-        vivado -mode batch -source build_base_xsa.tcl
+        bash "$repo_root/scripts/run_vivado.sh" -mode batch -source build_base_xsa.tcl
         mkdir -p ../../petalinux/project-spec/hw-description
-        cp -f base.xsa ../../petalinux/project-spec/hw-description/system.xsa
+        cp -f system.xsa ../../petalinux/project-spec/hw-description/system.xsa
         echo "==> system.xsa placed in petalinux/project-spec/hw-description/"
         popd > /dev/null
         ;;
@@ -19,7 +21,7 @@ case "${target}" in
         echo "==> Building TDC bitstream"
         mkdir -p hw/tdc/bitstream
         pushd hw/tdc > /dev/null
-        vivado -mode batch -source build_tdc.tcl
+        bash "$repo_root/scripts/run_vivado.sh" -mode batch -source build_tdc.tcl
         if [[ -f bitstream/tdc.bit ]]; then
             echo "all:{bitstream/tdc.bit}" > tdc.bif
             bootgen -image tdc.bif -arch zynqmp -o bitstream/tdc.bit.bin -w
@@ -34,7 +36,7 @@ case "${target}" in
         echo "==> Building CT bitstream"
         mkdir -p hw/ct/bitstream
         pushd hw/ct > /dev/null
-        vivado -mode batch -source build_ct.tcl
+        bash "$repo_root/scripts/run_vivado.sh" -mode batch -source build_ct.tcl
         if [[ -f bitstream/coincidence.bit ]]; then
             echo "all:{bitstream/coincidence.bit}" > ct.bif
             bootgen -image ct.bif -arch zynqmp -o bitstream/coincidence.bit.bin -w

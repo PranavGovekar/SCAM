@@ -43,7 +43,7 @@ entity ct_top is
         diff_in_n   : in  std_logic_vector(3 downto 0);
 
         en_i        : in  std_logic;
-        config      : in  std_logic_vector(63 downto 0);
+        config_i    : in  std_logic_vector(63 downto 0);
 
         fifo_dout_l : out std_logic_vector(31 downto 0);
         fifo_dout_h : out std_logic_vector(31 downto 0);
@@ -113,14 +113,14 @@ begin
     rst_combined <= rst or (not en_sync);
 
     -- Config decode (combinational)
-    window_width <= config(7 downto 0);
-    delay_a      <= config(15 downto 8);
-    delay_b      <= config(23 downto 16);
-    delay_c      <= config(31 downto 24);
-    delay_d      <= config(39 downto 32);
-    pulse_width  <= config(47 downto 40);
-    sel          <= config(51 downto 48);
-    pop_req      <= config(52);
+    window_width <= config_i(7 downto 0);
+    delay_a      <= config_i(15 downto 8);
+    delay_b      <= config_i(23 downto 16);
+    delay_c      <= config_i(31 downto 24);
+    delay_d      <= config_i(39 downto 32);
+    pulse_width  <= config_i(47 downto 40);
+    sel          <= config_i(51 downto 48);
+    pop_req      <= config_i(52);
 
     -- Pop request CDC + rising edge detect, in clk_fast domain
     process(clk_fast)

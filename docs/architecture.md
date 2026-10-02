@@ -46,8 +46,8 @@ Both outputs come from one MMCM inside `clk_wiz_0`.
 
 ### TDC
 
-    diff_in_0/1 -> diff_to_se -> hit_concat -> tdc_top -> axis_data_fifo
-                                                       -> axi_dma_0 (S2MM)
+    diff_in_0/1 -> diff_to_se -> tdc_top (per-channel async FIFOs)
+                              -> axi_dma_0 (S2MM)
                                                        -> DDR
     CPU reads DMA buffer, packetises 90 hits, sends UDP.
 
