@@ -41,5 +41,6 @@ ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
     HOME=/home/scam
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates file xz-utils zstd liblz4-tool dnsutils && rm -rf /var/lib/apt/lists/*
 USER ${SCAM_UID}:${SCAM_GID}
 WORKDIR /workspace

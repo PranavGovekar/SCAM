@@ -92,6 +92,58 @@ causes have therefore been ruled out; the Kconfig save failure remains
 unresolved. No container image build has yet started, so there is no fresh
 container `do_fetch` result.
 
+### XSA self-deletion bug (confirmed 2026-10-02)
+
+`petalinux-config --get-hw-description=<path>` clears
+`project-spec/hw-description/` before copying the XSA into it. If `<path>`
+is inside that directory (e.g. the XSA was docker-cp'd there), the tool
+deletes its own input and then reports "No XSA/DTS found in ...".
+
+Experiment: with the XSA inside `hw-description/`, the file existed before
+the run, the error appeared, and the file was gone after. With the XSA in
+`/tmp/xsa/` (outside the project) and `hw-description/` empty, the XSA
+error disappeared.
+
+`scripts/build_petalinux.sh` already passes `$repo_root/hw/base/system.xsa`
+which is outside the project directory, so the script is correct. The
+container wrapper mounts the repo at `/workspace`, making the path
+`/workspace/hw/base/system.xsa` — also outside `hw-description/`. No
+script change is needed.
+
+A separate `gen-machineconf: command not found` error was also observed.
+The tool exists at `components/yocto/layers/meta-xilinx/meta-xilinx-core/gen-machine-conf/gen-machineconf`
+but is not on PATH. This is a distinct issue from the Kconfig write failure.
+
+### .statistics overlay experiments (2026-10-02)
+
+**Host check:** `.statistics` is a **directory** on the host (containing
+`aarch64`, `aarch64_dt`, `arm`, `microblaze` files). The existing overlay
+already mounts a writable directory over it — no change needed.
+
+**Writable-SDK test:** Removed `readonly` from the SDK mount, ran the config.
+Result: same `*** Error during writing of the configuration.` The `find -newer`
+check showed no SDK files were modified. `readonly` restored.
+
+**Clean-state test:** Copied the project to a container-local directory,
+deleted all generated files from `project-spec/configs/` (config.old,
+plnx_syshw_data, flash_parts.txt, rootfs_config*, gen-machineconf.log*,
+.Xil/, busybox/, configs/, init-ifupdown/, rootfsconfigs/, systemd-conf/,
+.statistics), deleted build/ and components/, then ran the config.
+Result: failed with `[Errno 21] Is a directory:
+'/home/pranav/petalinux/2024.1/components/yocto/.statistics/'` — a different
+error, caused by the missing .statistics overlay in the clean copy.
+
+**Overlay removal test:** Removed the .statistics overlay entirely and tried
+`petalinux-util --webtalk off` (invalid subcommand — only 'gdb',
+'find-xsa-bitstream', 'xsdb-connect', 'dfu-util' are valid). The config then
+failed with `[Errno 21] Is a directory` because the SDK's read-only
+.statistics directory cannot be written. The overlay was restored.
+
+**Conclusion:** The .statistics directory overlay is correct and must stay.
+The Kconfig write failure is not caused by the .statistics overlay, SDK
+read-only mount, or mount layout. The failure occurs after all Kconfig
+prompts complete, at the file-write step, with no syscall error in the log.
+
 Remaining work is to fix and save first-run configuration, capture the first
 `do_fetch` error from fresh logs, build the TDC and CT application recipes,
 then build the full image. If the container shows an environment-specific
@@ -112,10 +164,24 @@ PetaLinux is configured from the base XSA, not the application XSAs.
 reads it.
 
 `make clean-build` removes generated Vivado products, host PetaLinux state,
-container PetaLinux state, download/shared-state caches, and temporary work
-directories. It preserves the project sources and configuration.
+container PetaLinux state, and temporary work directories. It preserves the
+project sources, configuration, and download/shared-state caches.
 Build the base XSA and bitstreams again with `make base-xsa`,
 `make tdc-bitstream`, and `make ct-bitstream`.
+
+## Clean targets
+
+| Target | Removes | Keeps |
+|--------|---------|-------|
+| `clean` | hw/*/build, system.xsa copies, .bit/.bit.bin/.bif, ./out, staged .bit.bin | All sources, recipes, PetaLinux config |
+| `clean-hw` | hw/*/build, system.xsa copies, .bit/.bit.bin/.bif, ./out | All sources, recipes, PetaLinux config |
+| `clean-staged` | C/H files synced from sw/ into recipes, staged .bit.bin copies | Recipes, all sources |
+| `clean-petalinux-config` | config, config.old, rootfs_config, rootfs_config.old, plnx_syshw_data, flash_parts.txt, gen-machineconf.log*, .Xil/, busybox/, configs/, init-ifupdown/, rootfsconfigs/, systemd-conf/, .statistics, psu_init* | config.template, rootfs_config.template |
+| `clean-petalinux-build` | petalinux/build, petalinux/.petalinux, /tmp/scam-petalinux-tmp | Config, sources, container cache |
+| `clean-container-state` | Container cache build/, components/yocto/layers, sysroots, cache, tmp/, home/ | downloads, sstate |
+| `clean-container-image` | Docker image scam-petalinux:2024.1-ubuntu22 | Everything else |
+| `clean-downloads-cache` | downloads and sstate caches only | Everything else |
+| `clean-build` | All of the above (clean-hw + clean-staged + clean-petalinux-config + clean-petalinux-build + clean-container-state) | downloads, sstate, sources, templates |
 
 ## Config templates
 

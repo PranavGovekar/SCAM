@@ -57,6 +57,7 @@ docker "${docker_args[@]}" \
     --env "HOME=/home/scam" \
     --env "PETALINUX_SETTINGS=$settings_path" \
     --env "PETALINUX_PROJECT_DIR=/workspace/petalinux" \
+    --env "KCONFIG_OVERWRITECONFIG=1" \
     --workdir /workspace \
     "$image" \
     bash scripts/build_petalinux.sh "$action"
