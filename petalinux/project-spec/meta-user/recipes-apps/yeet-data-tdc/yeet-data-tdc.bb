@@ -2,7 +2,6 @@ SUMMARY = "SCAM TDC readout application"
 LICENSE = "CLOSED"
 
 DEPENDS = "yeet-data-common"
-RDEPENDS:${PN} = "yeet-data-common"
 
 SRC_URI = "file://yeet-data-tdc.c \
            file://Makefile \
@@ -10,7 +9,7 @@ SRC_URI = "file://yeet-data-tdc.c \
 
 S = "${WORKDIR}"
 
-EXTRA_OEMAKE = "CC='${CC}' CFLAGS='${CFLAGS} -I${STAGING_INCDIR}' LDFLAGS='-L${STAGING_LIBDIR} -lscam_common'"
+EXTRA_OEMAKE = "CC='${CC}' CFLAGS='${CFLAGS} -I${STAGING_INCDIR}' LDFLAGS='${LDFLAGS} -L${STAGING_LIBDIR}' LDLIBS='-lscam_common'"
 
 do_compile() {
     oe_runmake

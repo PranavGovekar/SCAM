@@ -13,6 +13,8 @@
  * Optionally configures an external I2C DAC threshold on startup (-v flag).
  */
 
+#include <sys/mman.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

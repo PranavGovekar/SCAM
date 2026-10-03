@@ -9,7 +9,7 @@ cache_root="${SCAM_PETALINUX_CACHE:-${repo_root}/.cache/petalinux-2024.1-ubuntu2
 image="scam-petalinux:2024.1-ubuntu22"
 
 if [[ -z "$action" ]]; then
-    echo "Usage: $0 <config|build|app-tdc|app-ct>" >&2
+    echo "Usage: $0 <config|build|app-tdc|app-ct|fetch-check>" >&2
     exit 2
 fi
 if [[ ! -r "$settings_path" ]]; then
@@ -44,6 +44,18 @@ docker_args=(run --rm --init)
 # Build and app actions remain suitable for non-interactive automation.
 if [[ "$action" == "config" && -t 0 && -t 1 ]]; then
     docker_args+=(--interactive --tty)
+fi
+# PetaLinux treats the eSDK as "already set up" as soon as the environment-setup-*
+# marker exists. If layers/ or sysroots/ is missing while that marker survives,
+# every build dies at oe-init-build-env with an empty [ERROR]. Refuse early.
+if compgen -G "$cache_root/components/yocto/environment-setup-*" > /dev/null; then
+    if [[ ! -e "$cache_root/components/yocto/layers/poky/oe-init-build-env" ]]; then
+        cat >&2 <<'MSG'
+PetaLinux's saved build files are incomplete. Run:
+make clean-container-state, then make PETALINUX_ENV=container petalinux-config
+MSG
+        exit 1
+    fi
 fi
 docker "${docker_args[@]}" \
     --hostname scam-petalinux \

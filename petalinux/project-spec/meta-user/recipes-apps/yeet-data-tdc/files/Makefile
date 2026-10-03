@@ -7,7 +7,7 @@ OUT = yeet-data-tdc
 all: $(OUT)
 
 $(OUT): yeet-data-tdc.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
 	rm -f $(OUT)

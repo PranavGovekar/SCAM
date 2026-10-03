@@ -178,10 +178,32 @@ Build the base XSA and bitstreams again with `make base-xsa`,
 | `clean-staged` | C/H files synced from sw/ into recipes, staged .bit.bin copies | Recipes, all sources |
 | `clean-petalinux-config` | config, config.old, rootfs_config, rootfs_config.old, plnx_syshw_data, flash_parts.txt, gen-machineconf.log*, .Xil/, busybox/, configs/, init-ifupdown/, rootfsconfigs/, systemd-conf/, .statistics, psu_init* | config.template, rootfs_config.template |
 | `clean-petalinux-build` | petalinux/build, petalinux/.petalinux, /tmp/scam-petalinux-tmp | Config, sources, container cache |
-| `clean-container-state` | Container cache build/, components/yocto/layers, sysroots, cache, tmp/, home/ | downloads, sstate |
+| `clean-container-state` | The whole container `components/` and `build/` cache, plus `tmp/` and `home/` | `build/downloads` and `build/sstate-cache` only |
 | `clean-container-image` | Docker image scam-petalinux:2024.1-ubuntu22 | Everything else |
-| `clean-downloads-cache` | downloads and sstate caches only | Everything else |
+| `clean-downloads-cache` | `build/downloads`, `build/sstate-cache`, `components/yocto/downloads` | Everything else |
 | `clean-build` | All of the above (clean-hw + clean-staged + clean-petalinux-config + clean-petalinux-build + clean-container-state) | downloads, sstate, sources, templates |
+
+### Container cache layout
+
+The container keeps its PetaLinux state under `.cache/petalinux-2024.1-ubuntu22/`:
+
+| Path | What it is |
+|------|------------|
+| `components/yocto/layers`, `sysroots`, `cache`, `conf`, `workspace` | The generated PetaLinux eSDK |
+| `components/yocto/environment-setup-*`, `site-config-*`, `version-*` | Markers telling PetaLinux the eSDK is already set up |
+| `build/downloads` | `DL_DIR` — fetched source tarballs |
+| `build/sstate-cache` | `SSTATE_DIR` — build task cache |
+| `sdk-statistics` | Writable overlay for the read-only SDK's `.statistics` |
+
+`components/yocto/downloads` is **not** the download cache; it only holds
+`uninative`. The real `DL_DIR` is `build/downloads`.
+
+Because the `environment-setup-*` marker is what PetaLinux checks, deleting
+only `layers/`, `sysroots/` or `cache/` from `components/yocto/` leaves the
+marker behind and every later build fails at `oe-init-build-env` with an empty
+`[ERROR]`. Always remove `components/` whole. `make clean-container-state` does
+this, and the container wrapper refuses to start if it finds the marker without
+`layers/poky/oe-init-build-env`.
 
 ## Config templates
 

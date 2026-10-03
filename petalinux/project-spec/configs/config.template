@@ -14,6 +14,15 @@ CONFIG_SUBSYSTEM_ARCH_AARCH64=y
 # Networking
 CONFIG_SUBSYSTEM_ETHERNET_PSU_ETHERNET_0_MAC="00:0a:35:00:01:02"
 
+# Source download mirror.
+# Must NOT be left empty: an empty value makes gen-machineconf emit 13 PREMIRRORS
+# patterns with no mirror, which BitBake rejects as an odd-length list
+# ("should contain paired members") and then ignores entirely.
+# Must also NOT be exactly http://petalinux.xilinx.com/sswreleases/rel-v2024/downloads:
+# that value selects a code path in xilinx_mirrors.py with a typo that raises NameError.
+# edf.amd.com is where petalinux.xilinx.com redirects to, so use it directly.
+CONFIG_PRE_MIRROR_URL="https://edf.amd.com/sswreleases/rel-v2024/downloads"
+
 # Root filesystem type
 CONFIG_SUBSYSTEM_ROOTFS_EXT4=y
 

@@ -22,6 +22,7 @@
  *   ch2 @ 0xA0030008 -> {11'b0, pop, sel, pulse_width, delay_D}
  */
 
+#include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
