@@ -1,0 +1,21 @@
+# Per-machine build settings. Copy to config.mk (gitignored) and edit.
+# Anything here can also be given on the make command line.
+
+# Where PetaLinux builds run: host, or the Ubuntu 22.04 container (needs Docker).
+#PETALINUX_ENV := container
+
+# PetaLinux 2024.1 installation (default: ~/petalinux/2024.1).
+#PETALINUX_ROOT := $(HOME)/petalinux/2024.1
+
+# Vivado 2024.1 settings script. Without it, 'vivado' and 'bootgen' must be on PATH.
+#VIVADO_SETTINGS := /opt/Xilinx/Vivado/2024.1/settings64.sh
+
+# Parallel Vivado implementation jobs (default 8).
+#SCAM_JOBS := 8
+
+# Applications kept outside this repository: colon-separated directories, each
+# either one application or a directory of applications.
+#SCAM_APPS := $(HOME)/my-scam-apps
+
+# Installed SDK (sh sdk.sh -d <dir>) used by 'make app-<name>'.
+#SCAM_SDK := $(HOME)/scam-sdk

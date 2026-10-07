@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # Runtime bitstream swap helper, to be run on the ZCU102 itself.
-# Usage: swap_bitstream.sh <tdc|coincidence>
+# Usage: swap_bitstream.sh <name>     e.g. tdc, coincidence
 
 which="${1:-}"
-case "${which}" in
-    tdc|coincidence)
-        sudo fpgautil -b "/lib/firmware/${which}.bit.bin"
-        ;;
-    *)
-        echo "Usage: $0 <tdc|coincidence>"
-        exit 1
-        ;;
-esac
+bit="/lib/firmware/${which}.bit.bin"
+if [[ -z "${which}" || ! -f "${bit}" ]]; then
+    echo "Usage: $0 <name>"
+    echo "Available:"
+    for f in /lib/firmware/*.bit.bin; do
+        [[ -f "$f" ]] && echo "  $(basename "$f" .bit.bin)"
+    done
+    exit 1
+fi
+sudo fpgautil -b "${bit}"

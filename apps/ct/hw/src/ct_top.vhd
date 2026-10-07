@@ -21,7 +21,13 @@
 -- FIFO outputs:
 --   fifo_dout_l -> gpio_status   (32 bits)
 --   fifo_dout_h -> gpio_status2  (32 bits)
---   fifo_flags  -> gpio_flags[1:0] = {fifo_empty, fifo_valid}
+--   fifo_flags  -> gpio_flags (32 bits)
+--     [0]     fifo_valid, one-cycle pulse
+--     [1]     fifo_empty
+--     [2]     pop acknowledge: toggles each time a pop has put a new event
+--             on fifo_dout. Software waits for the toggle before reading.
+--     [31:16] events dropped because the FIFO was full (stops at 65535);
+--             cleared by reset or by dropping enable
 --
 -- Cross-domain caveat: fifo_dout_l/h are 2FF-synchronized from clk_fast to
 -- clk_axi. This is safe for slow rates (up to a few hundred kHz) but not
@@ -47,7 +53,7 @@ entity ct_top is
 
         fifo_dout_l : out std_logic_vector(31 downto 0);
         fifo_dout_h : out std_logic_vector(31 downto 0);
-        fifo_flags  : out std_logic_vector(1 downto 0);
+        fifo_flags  : out std_logic_vector(31 downto 0);
 
         coinc_out_o : out std_logic_vector(15 downto 0);
         hw_trig_o   : out std_logic
@@ -85,6 +91,11 @@ architecture rtl of ct_top is
     signal fifo_empty_s1, fifo_empty_s2 : std_logic := '0';
 
     signal rst_combined : std_logic;
+
+    signal dropped_raw            : std_logic_vector(15 downto 0);
+    signal dropped_s1, dropped_s2 : std_logic_vector(15 downto 0) := (others => '0');
+    signal pop_ack                : std_logic := '0';
+    signal pop_ack_s1, pop_ack_s2 : std_logic := '0';
 
 begin
 
@@ -160,8 +171,22 @@ begin
             fifo_dout      => fifo_dout_raw,
             fifo_valid     => fifo_valid_raw,
             fifo_empty     => fifo_empty_raw,
-            fifo_rd_en     => fifo_rd_pulse
+            fifo_rd_en     => fifo_rd_pulse,
+            fifo_dropped   => dropped_raw
         );
+
+    -- Pop acknowledge (clk_fast domain): toggles in the same cycle the popped
+    -- event appears on fifo_dout_raw.
+    process(clk_fast)
+    begin
+        if rising_edge(clk_fast) then
+            if rst_combined = '1' then
+                pop_ack <= '0';
+            elsif fifo_valid_raw = '1' then
+                pop_ack <= not pop_ack;
+            end if;
+        end if;
+    end process;
 
     -- 2FF sync FIFO outputs to clk_axi.
     process(clk_axi)
@@ -173,11 +198,15 @@ begin
             fifo_valid_s2 <= fifo_valid_s1;
             fifo_empty_s1 <= fifo_empty_raw;
             fifo_empty_s2 <= fifo_empty_s1;
+            pop_ack_s1    <= pop_ack;
+            pop_ack_s2    <= pop_ack_s1;
+            dropped_s1    <= dropped_raw;
+            dropped_s2    <= dropped_s1;
         end if;
     end process;
 
     fifo_dout_l <= fifo_dout_s2(31 downto 0);
     fifo_dout_h <= fifo_dout_s2(63 downto 32);
-    fifo_flags  <= fifo_empty_s2 & fifo_valid_s2;
+    fifo_flags  <= dropped_s2 & "0000000000000" & pop_ack_s2 & fifo_empty_s2 & fifo_valid_s2;
 
 end rtl;

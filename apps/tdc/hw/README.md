@@ -16,6 +16,6 @@ AXI footprint: unchanged from base.
 
 ## Build
 
-    make tdc
+    make tdc-bitstream
 
-Produces `hw/tdc/bitstream/tdc.bit.bin`.
+Produces `build/apps/tdc/tdc.bit.bin`. The block-design edits are in `bd.tcl`.

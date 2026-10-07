@@ -23,6 +23,13 @@ Any bitstream running in the SCAM Linux image must satisfy this contract.
 
 - `pl_ps_irq0` <- `axi_dma_0/s2mm_introut`
 
+## Fixed memory
+
+- `0x70000000`, 1 MiB of PS DDR is reserved in the device tree (`no-map`) as
+  the AXI DMA destination buffer. `DMA_RAM_BASE` / `DMA_RAM_SIZE` in
+  `sw/common/reg_io.h` name it. Point the DMA nowhere else: the rest of DDR
+  belongs to Linux.
+
 ## Usage per application
 
 ### TDC
@@ -43,17 +50,26 @@ Any bitstream running in the SCAM Linux image must satisfy this contract.
 - `axi_gpio_config` ch2: `{11'b0, pop_pulse, sel[3:0], pulse_width[7:0], delay_D[7:0]}`
 - `axi_gpio_status2[31:0]`: `fifo_dout[63:32]`
 - `axi_gpio_flags[1:0]`: `{fifo_empty, fifo_valid}`
+- `axi_gpio_flags[2]`: pop acknowledge, toggles each time a pop has put a new
+  event on `fifo_dout`
+- `axi_gpio_flags[31:16]`: events dropped because the FIFO was full (stops at
+  65535; cleared by reset or by dropping enable)
 
 ## Adding a new application
 
-Create a new Vivado project that layers on top of the base block design.
-Do not add or remove AXI peripherals. Route your application's signals
-through the existing GPIOs. Reuse `axi_gpio_config` bits as your own
+See `adding-an-app.md`. Your `hw/bd.tcl` edits a private copy of the base
+block design. Do not add or remove AXI peripherals. Route your application's
+signals through the existing GPIOs. Reuse `axi_gpio_config` bits as your own
 register space, documenting the bit assignment in your application's
 README.
 
+The build enforces this contract: after an application's `bd.tcl` has run,
+`hw/base/scam_app.tcl` checks the six addresses and ranges, the three clock
+frequencies, and the DMA interrupt, and stops if any differs.
+
 ## What breaks the contract
 
-- Adding a new AXI slave peripheral -> DT mismatch, kernel probe failure.
+- Adding a new AXI slave peripheral -> not described to the shared Linux
+  image, and other applications cannot rely on it.
 - Changing clock frequencies -> downstream timing assumptions break.
 - Binding a kernel driver to a PL peripheral -> reconfiguration hangs the bus.

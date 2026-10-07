@@ -14,6 +14,12 @@ CONFIG_sudo=y
 CONFIG_python3=y
 CONFIG_python3-modules=y
 
+# Login. The image has no usable root password, so this account is the way in
+# (serial console and SSH). Change the password after first boot: passwd
+CONFIG_ADD_EXTRA_USERS="petalinux:petalinux;"
+CONFIG_ADD_USERS_TO_GROUPS="petalinux:audio,video,dialout;"
+CONFIG_ADD_USERS_TO_SUDOERS="petalinux"
+
 # Utilities
 CONFIG_dosfstools=y
 CONFIG_e2fsprogs=y

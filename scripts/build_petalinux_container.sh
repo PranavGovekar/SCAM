@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run build_petalinux.sh inside the Ubuntu 22.04 prerequisite container.
+# Arguments are passed through unchanged.
+
+# shellcheck source=scripts/lib/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
 action="${1:-}"
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-petalinux_root="${PETALINUX_ROOT:-${HOME}/petalinux/2024.1}"
+repo_root="$SCAM_ROOT"
+petalinux_root="$PETALINUX_ROOT"
 settings_path="${petalinux_root}/settings.sh"
-cache_root="${SCAM_PETALINUX_CACHE:-${repo_root}/.cache/petalinux-2024.1-ubuntu22}"
-image="scam-petalinux:2024.1-ubuntu22"
+cache_root="$SCAM_PETALINUX_CACHE"
+image="$SCAM_CONTAINER_IMAGE"
 
 if [[ -z "$action" ]]; then
-    echo "Usage: $0 <config|build|app-tdc|app-ct|fetch-check>" >&2
+    echo "Usage: $0 <config|build|app <recipe>|package|sdk|fetch-check>" >&2
     exit 2
 fi
 if [[ ! -r "$settings_path" ]]; then
     echo "PetaLinux settings not found: $settings_path" >&2
-    echo "Set PETALINUX_ROOT to your PetaLinux 2024.1 installation." >&2
+    echo "Set PETALINUX_ROOT to your PetaLinux $PETALINUX_VERSION installation." >&2
     exit 1
 fi
 if ! command -v docker >/dev/null 2>&1; then
@@ -52,11 +58,18 @@ if compgen -G "$cache_root/components/yocto/environment-setup-*" > /dev/null; th
     if [[ ! -e "$cache_root/components/yocto/layers/poky/oe-init-build-env" ]]; then
         cat >&2 <<'MSG'
 PetaLinux's saved build files are incomplete. Run:
-make clean-container-state, then make PETALINUX_ENV=container petalinux-config
+make clean-container-state, then make petalinux-config
 MSG
         exit 1
     fi
 fi
+# Applications outside the repository must be visible at the same path.
+IFS=':' read -r -a extra_roots <<< "${SCAM_APPS:-}"
+for root in "${extra_roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    root="$(cd "$root" && pwd)"
+    docker_args+=(--mount "type=bind,src=$root,dst=$root,readonly")
+done
 docker "${docker_args[@]}" \
     --hostname scam-petalinux \
     --mount "type=bind,src=$repo_root,dst=/workspace" \
@@ -70,6 +83,8 @@ docker "${docker_args[@]}" \
     --env "PETALINUX_SETTINGS=$settings_path" \
     --env "PETALINUX_PROJECT_DIR=/workspace/petalinux" \
     --env "KCONFIG_OVERWRITECONFIG=1" \
+    --env "SCAM_APPS=${SCAM_APPS:-}" \
+    --env "SCAM_HOST_DL_DIR=$cache_root/build/downloads" \
     --workdir /workspace \
     "$image" \
-    bash scripts/build_petalinux.sh "$action"
+    bash scripts/build_petalinux.sh "$@"

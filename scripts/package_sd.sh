@@ -2,34 +2,41 @@
 set -euo pipefail
 
 # Assemble SD card artifacts into ./out/
-# Prerequisites: 'make petalinux' has produced images.
+# Prerequisites: 'make petalinux' built the image and the 'package' action
+# created BOOT.BIN (make sdcard does both in order).
 
-OUT=out
-mkdir -p "${OUT}"
+# shellcheck source=scripts/lib/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
-echo "==> Collecting PetaLinux artifacts"
-PL_IMG_DIR=petalinux/images/linux
+img="$SCAM_IMAGES_DIR"
+out="$SCAM_OUT"
 
-cp -f "${PL_IMG_DIR}/BOOT.BIN"       "${OUT}/" || true
-cp -f "${PL_IMG_DIR}/image.ub"       "${OUT}/" || true
-cp -f "${PL_IMG_DIR}/system.dtb"     "${OUT}/" || true
-
-# Rootfs: PetaLinux produces rootfs.tar.gz in the same dir
-if [[ -f "${PL_IMG_DIR}/rootfs.tar.gz" ]]; then
-    cp -f "${PL_IMG_DIR}/rootfs.tar.gz" "${OUT}/"
-elif [[ -f "${PL_IMG_DIR}/rootfs.ext4" ]]; then
-    cp -f "${PL_IMG_DIR}/rootfs.ext4" "${OUT}/"
-else
-    echo "WARN: no rootfs found in ${PL_IMG_DIR}"
+missing=0
+for f in BOOT.BIN image.ub boot.scr rootfs.tar.gz; do
+    if [[ ! -f "$img/$f" ]]; then
+        echo "missing: ${img#"$SCAM_ROOT"/}/$f" >&2
+        missing=1
+    fi
+done
+if [[ $missing -eq 1 ]]; then
+    echo "The PetaLinux image is incomplete. Run: make petalinux, then make sdcard" >&2
+    exit 1
 fi
 
+mkdir -p "$out"
+echo "==> Collecting PetaLinux artifacts"
+for f in BOOT.BIN image.ub boot.scr rootfs.tar.gz; do
+    cp -f "$img/$f" "$out/"
+done
+
+# The bitstreams the image installs are already inside the rootfs. Copies go
+# next to the boot files for convenience.
 echo "==> Copying bitstreams"
-[[ -f hw/tdc/bitstream/tdc.bit.bin ]] && \
-    cp -f hw/tdc/bitstream/tdc.bit.bin "${OUT}/" || echo "WARN: tdc.bit.bin missing"
-[[ -f hw/ct/bitstream/coincidence.bit.bin ]] && \
-    cp -f hw/ct/bitstream/coincidence.bit.bin "${OUT}/" || \
-    echo "WARN: coincidence.bit.bin missing"
+rm -f "$out"/*.bit.bin
+for bit in "$SCAM_RECIPES"/recipes-bsp/fpga-bitstreams/files/*.bit.bin; do
+    [[ -f "$bit" ]] && cp -f "$bit" "$out/"
+done
 
 echo
-echo "SD card contents in ${OUT}/:"
-ls -lh "${OUT}/"
+echo "SD card contents in ${out#"$SCAM_ROOT"/}/:"
+ls -lh "$out/"

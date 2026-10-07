@@ -2,7 +2,8 @@
 
 ## Big picture
 
-One Linux image. Two bitstreams. Bitstream swapped at runtime.
+One Linux image. Any number of application bitstreams (TDC and CT are
+included), swapped at runtime.
 
     +-----------------------------------------------------+
     |  Host PC                                            |
@@ -31,7 +32,7 @@ bound to the AXI GPIOs or the AXI DMA. Consequences:
 
 Any bitstream that drops into this Linux image must respect the AXI
 footprint in `pl-contract.md`. TDC and CT both do. New applications
-must too.
+must too, and the bitstream build checks it. See `adding-an-app.md`.
 
 ## Clock domains
 

@@ -7,14 +7,20 @@
  *
  *   AXI_GPIO_STATUS   + 0x00  -> fifo_dout[31:0]
  *   AXI_GPIO_STATUS2  + 0x00  -> fifo_dout[63:32]
- *   AXI_GPIO_FLAGS    + 0x00  -> bit0 = fifo_valid (1 clk pulse, often missed)
- *                                bit1 = fifo_empty
+ *   AXI_GPIO_FLAGS    + 0x00  -> bit0     = fifo_valid (1 clk pulse, often missed)
+ *                                bit1     = fifo_empty
+ *                                bit2     = pop acknowledge, toggles per pop
+ *                                [31:16]  = events dropped because the FIFO
+ *                                           was full (stops at 65535)
+ *
+ * The FIFO output register only changes when the FIFO is popped (it is not
+ * first-word-fall-through), so an event is popped first and read afterwards.
  *
  * Read protocol per event:
- *   1. poll fifo_empty; if 1, no data yet
- *   2. read fifo_dout_l, fifo_dout_h
- *   3. write config with pop bit set, then clear (pulse)
- *   4. wait a few microseconds for the FIFO pointer to advance
+ *   1. read flags; if fifo_empty is 1, no data yet
+ *   2. write config with pop bit set, then clear (pulse)
+ *   3. read flags until the pop acknowledge bit has toggled
+ *   4. read fifo_dout_l, fifo_dout_h
  *   5. repeat
  *
  * Config register (64-bit dual channel):
@@ -41,7 +47,13 @@
 #define EVENT_SIZE_BYTES   8    /* 64-bit event word sent as-is */
 
 #define POLL_SLEEP_US      5
-#define POP_SETTLE_US      2
+
+#define FLAG_EMPTY         0x00000002u
+#define FLAG_POP_ACK       0x00000004u
+#define FLAGS_DROPPED(f)   ((f) >> 16)
+/* The acknowledge arrives within a few register reads. This bound only keeps
+   the loop from spinning forever if the hardware does not answer. */
+#define POP_ACK_MAX_READS  10000
 
 /* Default configuration */
 #define DEFAULT_WINDOW     6    /* 6 * 5 ns = 30 ns at 200 MHz */
@@ -54,19 +66,7 @@ static volatile sig_atomic_t keep_running = 1;
 static void on_sigint(int sig)
 {
     (void)sig;
-    printf("\n[SIGINT] stopping\n");
     keep_running = 0;
-}
-
-static uint64_t pack_config(uint32_t ch1, uint32_t ch2)
-{
-    return ((uint64_t)ch2 << 32) | (uint64_t)ch1;
-}
-
-static void unpack_config(uint64_t cfg, uint32_t *ch1, uint32_t *ch2)
-{
-    *ch1 = (uint32_t)(cfg & 0xFFFFFFFFULL);
-    *ch2 = (uint32_t)(cfg >> 32);
 }
 
 int main(int argc, char **argv)
@@ -74,7 +74,11 @@ int main(int argc, char **argv)
     app_args_t args;
     args_parse(argc, argv, &args);
 
+    /* Any ordinary way of stopping the program ends the run cleanly, including
+       the SSH session that started it going away. */
     signal(SIGINT, on_sigint);
+    signal(SIGTERM, on_sigint);
+    signal(SIGHUP, on_sigint);
 
     if (args.dac_mv >= 0) {
         if (i2c_dac_set_threshold(args.dac_mv) != 0) {
@@ -115,15 +119,11 @@ int main(int argc, char **argv)
                    ((uint32_t)DEFAULT_DELAY << 16) |
                    ((uint32_t)DEFAULT_DELAY << 8)  |
                    (uint32_t)DEFAULT_WINDOW;
-    uint32_t ch2 = ((uint32_t)DEFAULT_SEL << 8) |
-                   (uint32_t)DEFAULT_PULSE;
-    /* bits [51:48] = sel, [47:40] = pulse_width, [39:32] = delay_D
-       In ch2 layout above: sel at [19:16], pulse at [15:8], delay_D at [7:0].
-       That's because ch2 covers config[63:32], and config[51:48] -> ch2[19:16],
-       config[47:40] -> ch2[15:8], config[39:32] -> ch2[7:0]. */
-    ch2 = ((uint32_t)DEFAULT_SEL   << 16) |
-          ((uint32_t)DEFAULT_PULSE << 8)  |
-          (uint32_t)DEFAULT_DELAY;
+    /* ch2 covers config[63:32]: sel at [19:16], pulse_width at [15:8],
+       delay_D at [7:0], pop at [20]. */
+    uint32_t ch2 = ((uint32_t)DEFAULT_SEL   << 16) |
+                   ((uint32_t)DEFAULT_PULSE << 8)  |
+                   (uint32_t)DEFAULT_DELAY;
 
     write_reg(gpio_config, GPIO_DATA,  ch1);
     write_reg(gpio_config, GPIO2_DATA, ch2);
@@ -131,7 +131,6 @@ int main(int argc, char **argv)
     write_reg(gpio_ctrl, GPIO_DATA, CTRL_WAKEUP);
 
     long hits_sent    = 0;
-    long packets_sent = 0;
     time_t start_time = time(NULL);
 
     uint8_t packet[EVENT_SIZE_BYTES];
@@ -141,28 +140,48 @@ int main(int argc, char **argv)
         if (args.max_hits    > 0 && hits_sent >= args.max_hits) break;
 
         uint32_t flags = read_reg(gpio_flags, GPIO_DATA);
-        if (flags & 0x2) {
+        if (flags & FLAG_EMPTY) {
             /* FIFO empty */
             usleep(POLL_SLEEP_US);
             continue;
+        }
+
+        /* Pop: pulse bit 20 of ch2 (config[52] -> ch2[20]). The rising edge
+           moves the oldest event into the FIFO output register. */
+        uint32_t ch2_pop = ch2 | (1u << 20);
+        write_reg(gpio_config, GPIO2_DATA, ch2_pop);
+        write_reg(gpio_config, GPIO2_DATA, ch2);
+
+        /* The hardware toggles the acknowledge bit when the popped event is in
+           the output register. Reading the data one register access later
+           guarantees it has reached the GPIOs. */
+        int reads = 0;
+        while (((read_reg(gpio_flags, GPIO_DATA) ^ flags) & FLAG_POP_ACK) == 0) {
+            if (++reads >= POP_ACK_MAX_READS) break;
+        }
+        if (reads >= POP_ACK_MAX_READS) {
+            fprintf(stderr, "ERROR: FIFO pop was not acknowledged; is the CT bitstream loaded?\n");
+            break;
         }
 
         uint32_t lo = read_reg(gpio_status,  GPIO_DATA);
         uint32_t hi = read_reg(gpio_status2, GPIO_DATA);
         uint64_t ev = ((uint64_t)hi << 32) | (uint64_t)lo;
 
-        /* Pop: pulse bit 20 of ch2 (config[52] -> ch2[20]) */
-        uint32_t ch2_pop = ch2 | (1u << 20);
-        write_reg(gpio_config, GPIO2_DATA, ch2_pop);
-        usleep(POP_SETTLE_US);
-        write_reg(gpio_config, GPIO2_DATA, ch2);
-
         memcpy(packet, &ev, EVENT_SIZE_BYTES);
 
         if (udp_send(&sock, packet, EVENT_SIZE_BYTES) < 0) break;
 
-        packets_sent++;
         hits_sent += EVENTS_PER_PACKET;
+    }
+
+    /* Read the dropped-event count before disabling: disabling clears it.
+       The count can change while it is read, so read until two agree. */
+    uint32_t dropped = FLAGS_DROPPED(read_reg(gpio_flags, GPIO_DATA));
+    for (int i = 0; i < 8; i++) {
+        uint32_t again = FLAGS_DROPPED(read_reg(gpio_flags, GPIO_DATA));
+        if (again == dropped) break;
+        dropped = again;
     }
 
     write_reg(gpio_ctrl, GPIO_DATA, CTRL_CLEAR);
@@ -170,7 +189,9 @@ int main(int argc, char **argv)
     write_reg(gpio_ctrl, GPIO_DATA, CTRL_RESET);
 
     printf("\n=== DONE ===\n");
-    printf("Events sent : %ld\n", hits_sent);
+    printf("Events sent    : %ld\n", hits_sent);
+    printf("Events dropped : %u%s (FIFO full)\n", dropped,
+           dropped == 0xFFFF ? " or more" : "");
 
     udp_close(&sock);
     return 0;

@@ -3,15 +3,20 @@
 ### **S**o, **C**an **A**nyone **M**ake-this-work?
 
 Modular FPGA + PetaLinux platform for physics DAQ on the **Xilinx ZCU102**
-(Zynq UltraScale+ XCZU9EG). Two application bitstreams share one Linux image:
+(Zynq UltraScale+ XCZU9EG). Application bitstreams share one Linux image. Two
+applications are included:
 
 - **TDC** — 2-channel time-to-digital converter, DMA readout to DDR
 - **CT**  — 4-channel multifold coincidence trigger, timestamped FIFO
 
-The Linux image, rootfs, and device tree are identical for both. Bitstreams
-are swapped at runtime with `fpgautil`; userspace code talks to PL registers
-through `/dev/mem`. No kernel drivers are bound to PL peripherals, so no
-reboot is needed to switch applications.
+The Linux image, rootfs, and device tree are identical for every application.
+Bitstreams are swapped at runtime with `fpgautil`; userspace code talks to PL
+registers through `/dev/mem`. No kernel drivers are bound to PL peripherals, so
+no reboot is needed to switch applications.
+
+You can add your own application (hardware and software) on top of the
+prebuilt image without touching the rest of the repository: see
+[docs/adding-an-app.md](docs/adding-an-app.md).
 
 ---
 
@@ -20,6 +25,7 @@ reboot is needed to switch applications.
 - [Hardware](#hardware)
 - [Repository layout](#repository-layout)
 - [Prerequisites](#prerequisites)
+- [Adding your own application](#adding-your-own-application)
 - [Build](#build)
 - [Runtime on the ZCU102](#runtime-on-the-zcu102)
 - [The PL contract](#the-pl-contract)
@@ -31,8 +37,8 @@ reboot is needed to switch applications.
 
 - Board: ZCU102 rev 1.0
 - Part: `xczu9eg-ffvb1156-2-e`
-- Vivado: 2023.2 or newer
-- PetaLinux: 2023.2 or newer
+- Vivado: 2024.1
+- PetaLinux: 2024.1
 - Ethernet: PS GEM3 (MIO 64..77), 1 GbE
 - Host PC connects over the same network, receives UDP on port 8080
 
@@ -41,15 +47,16 @@ reboot is needed to switch applications.
 ## Repository layout
 
     hw/base         Base Vivado project (PS + interconnect + GPIOs + DMA)
-    hw/tdc          TDC application (VHDL + TCL on top of base)
-    hw/ct           Coincidence trigger application (VHDL + TCL on top of base)
-    sw/common       Shared C headers and helpers (reg_io, udp, i2c_dac, args)
-    sw/tdc          TDC userspace application
-    sw/ct           CT userspace application
+                    and the shared application build script
+    apps/tdc        TDC application: hw/ (VHDL + block-design TCL), sw/ (C)
+    apps/ct         Coincidence trigger application: hw/, sw/
+    apps/_template  Starting point for `make new-app`
+    sw/common       Shared C helpers (reg_io, udp, i2c_dac, args) and app.mk
     sw/host         Python UDP collector (runs on the host PC)
     petalinux       PetaLinux project skeleton
-    scripts         Build, package, flash helpers
+    scripts         Build, package, flash, deploy helpers
     docs            Architecture, contract, build guide, test plan
+    build/          Generated: bitstreams and binaries (build/apps/<name>/)
 
 ---
 
@@ -57,12 +64,15 @@ reboot is needed to switch applications.
 
 Build host (Linux):
 
-- Xilinx Vivado 2023.2+
-- Xilinx PetaLinux 2023.2+
-- GNU Make, `bash`, `git`, `bootgen`
+- Xilinx Vivado 2024.1 (includes `bootgen`) -- for bitstreams
+- The SCAM SDK from a release, or built with `make sdk` -- for C applications
+- Xilinx PetaLinux 2024.1 -- only to build the Linux image yourself; it can
+  run in the provided Ubuntu 22.04 container (`PETALINUX_ENV=container`)
+- GNU Make, `bash`, `git`
 - Python 3.9+ on the host PC (for the UDP collector)
 
-Tested on Ubuntu 20.04 and 22.04.
+Machine-specific settings (tool paths, `PETALINUX_ENV`) go in `config.mk`;
+see `config.mk.example`.
 
 Runtime target:
 
@@ -71,32 +81,50 @@ Runtime target:
 
 ---
 
+## Adding your own application
+
+    make new-app NAME=myapp                       # creates apps/myapp/ from the template
+    make myapp-bitstream                          # Vivado -> build/apps/myapp/myapp.bit.bin
+    make app-myapp SCAM_SDK=~/scam-sdk            # SDK    -> build/apps/myapp/yeet-data-myapp
+    make deploy APP=myapp TARGET=petalinux@<ip>   # copy both to a running board
+
+No PetaLinux build is involved. Applications can also live outside this
+repository (`SCAM_APPS`). Full walkthrough: `docs/adding-an-app.md`.
+
+---
+
 ## Build
 
-One-time setup:
+`make help` lists every target. `make doctor` checks that the machine has the
+tools the build needs, and `make status` shows what is built, what is out of
+date, and what to run next. Bitstreams and binaries:
 
-    make base-xsa            # generate base XSA, place in petalinux hw-description
-    make petalinux-config    # only needed if you change the BSP or device tree
+    make base-xsa            # generate the base XSA (hw/base/system.xsa)
+    make bitstreams          # every application's .bit.bin
+    make apps                # every application's binary (needs SCAM_SDK)
 
-Per-application build:
+The Linux image (only if you are not using a release image):
 
-    make bitstreams          # generate tdc.bit.bin + coincidence.bit.bin
-    make petalinux           # build the Linux image
-    make sdcard              # assemble ./out/ for SD card
+    make petalinux           # configure if needed, then build the image
+    make sdcard              # BOOT.BIN + SD image, assemble ./out/
     make flash SD=/dev/sdX   # write ./out/ to the SD card
+    make sdk release         # SDK installer, then release files in out/release/
 
-Full pipeline (base + both bitstreams + image + SD card):
+Full pipeline (base + bitstreams + image + SD card files):
 
     make all
 
-See `docs/build-guide.md` for details.
+Targets rebuild only what changed. See `docs/build-guide.md` for details.
 
 ---
 
 ## Runtime on the ZCU102
 
-Both bitstreams and both userspace binaries are on the SD card after
-`make sdcard`.
+The TDC and CT bitstreams and userspace binaries are part of the image.
+
+Log in on the serial console or over SSH as `petalinux`, password `petalinux`
+(it has `sudo`). Change the password with `passwd` on a board that is on a
+shared network.
 
 Boot defaults are set in `/etc/fpga-application.conf`:
 
@@ -115,7 +143,11 @@ To swap back to TDC:
 To collect data on the host PC:
 
     pip install -r sw/host/requirements.txt
-    python sw/host/collect_data.py -n 18000 192.168.1.100
+    python sw/host/collect_data.py -n 18000 <board-ip>            # TDC
+    python sw/host/collect_data.py --app ct -n 1000 <board-ip>    # CT
+
+The collector starts the program on the board over SSH, so the `sudo
+yeet-data-*` commands above are only needed when you run it by hand.
 
 ---
 
@@ -161,8 +193,9 @@ empty before blaming the network.
 Run `sudo fpgautil -R` to reset the FPGA manager, then re-load.
 
 **`make petalinux` fails on a fresh host.**
-PetaLinux 2023.2 needs `gcc-multilib`, `libssl-dev`, `chrpath`, and
-`gawk`. See `docs/build-guide.md` for the full list.
+PetaLinux 2024.1 needs an AMD-supported host distribution. On anything else
+use the container: `make petalinux PETALINUX_ENV=container`. See
+`docs/build-guide.md`.
 
 ---
 

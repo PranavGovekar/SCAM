@@ -1,42 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Format and write SD card.
+# Format and write SD card from ./out/.
 # Usage: flash_sd.sh /dev/sdX
 #
-# Refuses to write to obvious root devices.
+# Refuses to write to a disk that holds a mounted system partition.
+
+# shellcheck source=scripts/lib/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 DEV="${1:-}"
-if [[ -z "${DEV}" ]]; then
-    echo "Usage: $0 /dev/sdX"
+if [[ -z "${DEV}" || "${DEV}" == /dev/sdX ]]; then
+    echo "Usage: $0 /dev/sdX   (make flash SD=/dev/sdX)" >&2
+    echo "Removable disks:" >&2
+    lsblk -d -o NAME,SIZE,RM,MODEL | awk 'NR==1 || $3==1' >&2
     exit 1
 fi
-
-case "${DEV}" in
-    /dev/sda|/dev/sda[0-9]*|/dev/nvme*)
-        echo "REFUSING to touch ${DEV} (looks like a system disk)"
-        exit 1
-        ;;
-esac
 
 if [[ ! -b "${DEV}" ]]; then
-    echo "${DEV} is not a block device"
+    echo "${DEV} is not a block device" >&2
     exit 1
 fi
-
-OUT=out
-if [[ ! -f "${OUT}/BOOT.BIN" || ! -f "${OUT}/image.ub" ]]; then
-    echo "ERROR: ${OUT}/BOOT.BIN or image.ub missing. Run 'make sdcard' first."
+if [[ "$(lsblk -dno TYPE "${DEV}")" != disk ]]; then
+    echo "${DEV} is not a whole disk (give the disk, not a partition)" >&2
     exit 1
 fi
+# Anything of the running system mounted from this disk means it is not an SD
+# card we may erase.
+while read -r mnt; do
+    case "$mnt" in
+        /|/boot|/boot/*|/home|/usr|/var|/nix|"[SWAP]")
+            echo "REFUSING to touch ${DEV}: it holds the mounted system path '$mnt'" >&2
+            exit 1
+            ;;
+    esac
+done < <(lsblk -nro MOUNTPOINTS "${DEV}" 2>/dev/null || lsblk -nro MOUNTPOINT "${DEV}")
 
-echo "About to write to: ${DEV}"
+OUT="$SCAM_OUT"
+for f in BOOT.BIN image.ub boot.scr rootfs.tar.gz; do
+    if [[ ! -f "${OUT}/$f" ]]; then
+        echo "ERROR: ${OUT}/$f missing. Run 'make sdcard' first." >&2
+        exit 1
+    fi
+done
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Partitioning needs root; re-running with sudo."
+    exec sudo -- bash "${BASH_SOURCE[0]}" "$@"
+fi
+
+echo "About to ERASE and write to: ${DEV}"
 lsblk "${DEV}" || true
 echo
 echo "Contents to be written:"
 ls -lh "${OUT}/"
 echo
-read -p "Type 'yes' to continue: " ans
+read -r -p "Type 'yes' to continue: " ans
 if [[ "${ans}" != "yes" ]]; then
     echo "Aborted."
     exit 1
@@ -50,11 +69,16 @@ parted -s "${DEV}" mklabel msdos
 parted -s "${DEV}" mkpart primary fat32 1MiB 512MiB
 parted -s "${DEV}" mkpart primary ext4 512MiB 100%
 parted -s "${DEV}" set 1 boot on
+partprobe "${DEV}" 2>/dev/null || true
 sleep 1
 
-PART_BOOT="${DEV}1"
-PART_ROOT="${DEV}2"
-[[ "${DEV}" =~ [0-9]$ ]] && PART_BOOT="${DEV}p1" && PART_ROOT="${DEV}p2"
+if [[ "${DEV}" =~ [0-9]$ ]]; then
+    PART_BOOT="${DEV}p1"
+    PART_ROOT="${DEV}p2"
+else
+    PART_BOOT="${DEV}1"
+    PART_ROOT="${DEV}2"
+fi
 
 echo "==> mkfs BOOT (FAT32)"
 mkfs.vfat -F 32 -n BOOT "${PART_BOOT}"
@@ -65,27 +89,23 @@ mkfs.ext4 -F -L rootfs "${PART_ROOT}"
 echo "==> Mounting and copying"
 MNT_BOOT=$(mktemp -d)
 MNT_ROOT=$(mktemp -d)
+cleanup() {
+    umount "${MNT_BOOT}" 2>/dev/null || true
+    umount "${MNT_ROOT}" 2>/dev/null || true
+    rmdir "${MNT_BOOT}" "${MNT_ROOT}" 2>/dev/null || true
+}
+trap cleanup EXIT
 mount "${PART_BOOT}" "${MNT_BOOT}"
 mount "${PART_ROOT}" "${MNT_ROOT}"
 
-cp -f "${OUT}/BOOT.BIN" "${MNT_BOOT}/"
-cp -f "${OUT}/image.ub" "${MNT_BOOT}/"
-[[ -f "${OUT}/system.dtb" ]] && cp -f "${OUT}/system.dtb" "${MNT_BOOT}/"
-[[ -f "${OUT}/tdc.bit.bin" ]] && cp -f "${OUT}/tdc.bit.bin" "${MNT_BOOT}/"
-[[ -f "${OUT}/coincidence.bit.bin" ]] && cp -f "${OUT}/coincidence.bit.bin" "${MNT_BOOT}/"
+cp -f "${OUT}/BOOT.BIN" "${OUT}/image.ub" "${OUT}/boot.scr" "${MNT_BOOT}/"
+for bit in "${OUT}"/*.bit.bin; do
+    [[ -f "$bit" ]] && cp -f "$bit" "${MNT_BOOT}/"
+done
 
-if [[ -f "${OUT}/rootfs.tar.gz" ]]; then
-    echo "==> Extracting rootfs"
-    tar -xzf "${OUT}/rootfs.tar.gz" -C "${MNT_ROOT}"
-elif [[ -f "${OUT}/rootfs.ext4" ]]; then
-    echo "==> Copying rootfs.ext4"
-    dd if="${OUT}/rootfs.ext4" of="${PART_ROOT}" bs=4M status=progress
-fi
+echo "==> Extracting rootfs"
+tar -xzf "${OUT}/rootfs.tar.gz" -C "${MNT_ROOT}"
 
 sync
-umount "${MNT_BOOT}"
-umount "${MNT_ROOT}"
-rmdir "${MNT_BOOT}" "${MNT_ROOT}"
-
 echo
 echo "==> Done. SD card ${DEV} is ready."

@@ -14,6 +14,10 @@ void *map_phys(uint32_t base, size_t size)
         return MAP_FAILED;
     }
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, base);
+    if (p == MAP_FAILED) {
+        fprintf(stderr, "mmap /dev/mem at 0x%08X: ", (unsigned)base);
+        perror(NULL);
+    }
     close(fd);
     return p;
 }

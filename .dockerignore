@@ -1,12 +1,12 @@
 .git
 .cache
 out
+build
 hw/base/build
-hw/ct/build
-hw/tdc/build
 petalinux/build
 petalinux/components
 petalinux/images
+config.mk
 *.jou
 *.log
 *.bit

@@ -51,7 +51,9 @@ entity four_fold_coincidence is
         fifo_dout      : out std_logic_vector(63 downto 0);
         fifo_valid     : out std_logic;
         fifo_empty     : out std_logic;
-        fifo_rd_en     : in  std_logic
+        fifo_rd_en     : in  std_logic;
+        -- Events lost because the FIFO was full. Stops at all ones.
+        fifo_dropped   : out std_logic_vector(15 downto 0)
     );
 end entity four_fold_coincidence;
 
@@ -116,11 +118,16 @@ architecture rtl of four_fold_coincidence is
 
     signal fifo_wr_en   : std_logic := '0';
     signal fifo_wr_data : std_logic_vector(63 downto 0) := (others => '0');
-    signal coinc_latch  : std_logic_vector(15 downto 0) := (others => '0');
+    -- coinc_reg delayed to line up with trigger_out_i (mux_out, rising_det,
+    -- one_shot, trigger_out_i = 4 stages), so the pattern stored with an event
+    -- is the one that was present when the selected combination fired.
+    type coinc_pipe_t is array (1 to 4) of std_logic_vector(15 downto 0);
+    signal coinc_pipe   : coinc_pipe_t := (others => (others => '0'));
 
     signal fifo_empty_i : std_logic := '1';
     signal fifo_valid_i : std_logic := '0';
     signal fifo_dout_i  : std_logic_vector(63 downto 0) := (others => '0');
+    signal dropped_cnt  : unsigned(15 downto 0) := (others => '0');
 
 begin
 
@@ -270,15 +277,15 @@ begin
             if rst = '1' then
                 fifo_wr_en       <= '0';
                 fifo_wr_data     <= (others => '0');
-                coinc_latch      <= (others => '0');
+                coinc_pipe       <= (others => (others => '0'));
                 trigger_out_prev <= '0';
             else
                 fifo_wr_en       <= '0';
                 trigger_out_prev <= trigger_out_i;
+                coinc_pipe       <= coinc_reg & coinc_pipe(1 to 3);
 
                 if trigger_out_i = '1' and trigger_out_prev = '0' then
-                    coinc_latch  <= coinc_reg;
-                    fifo_wr_data <= std_logic_vector(timestamp) & coinc_reg;
+                    fifo_wr_data <= std_logic_vector(timestamp) & coinc_pipe(4);
                     fifo_wr_en   <= '1';
                 end if;
             end if;
@@ -286,6 +293,8 @@ begin
     end process PROC_FIFO_WRITE;
 
     PROC_FIFO : process(clk)
+        variable do_wr : boolean;
+        variable do_rd : boolean;
     begin
         if rising_edge(clk) then
             if rst = '1' then
@@ -295,10 +304,22 @@ begin
                 fifo_valid_i <= '0';
                 fifo_empty_i <= '1';
                 fifo_dout_i  <= (others => '0');
+                dropped_cnt  <= (others => '0');
             else
                 fifo_valid_i <= '0';
 
-                if fifo_wr_en = '1' and fifo_count < FIFO_DEPTH then
+                -- A write is dropped when full and a read is ignored when
+                -- empty. Pointers and the count are updated from these two
+                -- decisions only, so they cannot disagree when both happen
+                -- in the same cycle.
+                do_wr := fifo_wr_en = '1' and fifo_count < FIFO_DEPTH;
+                do_rd := fifo_rd_en = '1' and fifo_count > 0;
+
+                if fifo_wr_en = '1' and not do_wr and dropped_cnt /= x"FFFF" then
+                    dropped_cnt <= dropped_cnt + 1;
+                end if;
+
+                if do_wr then
                     fifo_mem(wr_ptr) <= fifo_wr_data;
                     if wr_ptr = FIFO_DEPTH-1 then
                         wr_ptr <= 0;
@@ -307,7 +328,7 @@ begin
                     end if;
                 end if;
 
-                if fifo_rd_en = '1' and fifo_count > 0 then
+                if do_rd then
                     fifo_dout_i  <= fifo_mem(rd_ptr);
                     fifo_valid_i <= '1';
                     if rd_ptr = FIFO_DEPTH-1 then
@@ -317,20 +338,14 @@ begin
                     end if;
                 end if;
 
-                if fifo_wr_en = '1' and fifo_rd_en = '0'
-                   and fifo_count < FIFO_DEPTH then
+                if do_wr and not do_rd then
                     fifo_count   <= fifo_count + 1;
                     fifo_empty_i <= '0';
-                elsif fifo_rd_en = '1' and fifo_wr_en = '0'
-                      and fifo_count > 0 then
+                elsif do_rd and not do_wr then
                     fifo_count <= fifo_count - 1;
                     if fifo_count = 1 then
                         fifo_empty_i <= '1';
                     end if;
-                elsif fifo_wr_en = '1' and fifo_rd_en = '1'
-                      and fifo_count > 0 and fifo_count < FIFO_DEPTH then
-                    fifo_count   <= fifo_count;
-                    fifo_empty_i <= '0';
                 end if;
             end if;
         end if;
@@ -339,5 +354,6 @@ begin
     fifo_dout  <= fifo_dout_i;
     fifo_valid <= fifo_valid_i;
     fifo_empty <= fifo_empty_i;
+    fifo_dropped <= std_logic_vector(dropped_cnt);
 
 end architecture rtl;

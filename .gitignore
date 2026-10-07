@@ -6,12 +6,9 @@
 .Xil/
 vivado*.str
 vivado*.zip
+*.bif
 build/
 hw/base/build/
-hw/tdc/build/
-hw/ct/build/
-hw/ct/ct.bif
-hw/tdc/tdc.bif
 
 # PetaLinux
 petalinux/build/
@@ -35,14 +32,15 @@ petalinux/project-spec/configs/rootfsconfigs/
 petalinux/project-spec/configs/flash_parts.txt
 petalinux/project-spec/attributes
 petalinux/project-spec/hw-description/psu_init*.*
-petalinux/project-spec/meta-user/recipes-apps/yeet-data-common/files/*.c
-petalinux/project-spec/meta-user/recipes-apps/yeet-data-common/files/*.h
-petalinux/project-spec/meta-user/recipes-apps/yeet-data-tdc/files/*.c
-petalinux/project-spec/meta-user/recipes-apps/yeet-data-ct/files/*.c
+petalinux/project-spec/configs/systemd-conf/
+# Staged from sw/common and apps/*/sw by scripts/stage_assets.sh
+petalinux/project-spec/meta-user/recipes-apps/*/files/*.c
+petalinux/project-spec/meta-user/recipes-apps/*/files/*.h
 
 # Build outputs
 out/
 .cache/
+config.mk
 *.o
 *.elf
 *.bin

@@ -31,8 +31,6 @@
 #define HITS_PER_PACKET    90
 #define PACKET_SIZE_BYTES  (HIT_SIZE_BYTES * HITS_PER_PACKET)
 #define UDP_PORT           8080
-#define DMA_RAM_BASE       0x70000000UL
-#define DMA_RAM_SIZE       0x00100000UL
 
 #define POLL_SLEEP_US      10
 #define WATCHDOG_TICKS     200000
@@ -42,7 +40,6 @@ static volatile sig_atomic_t keep_running = 1;
 static void on_sigint(int sig)
 {
     (void)sig;
-    printf("\n[SIGINT] stopping\n");
     keep_running = 0;
 }
 
@@ -58,7 +55,11 @@ int main(int argc, char **argv)
     app_args_t args;
     args_parse(argc, argv, &args);
 
+    /* Any ordinary way of stopping the program ends the run cleanly, including
+       the SSH session that started it going away. */
     signal(SIGINT, on_sigint);
+    signal(SIGTERM, on_sigint);
+    signal(SIGHUP, on_sigint);
 
     if (args.dac_mv >= 0) {
         if (i2c_dac_set_threshold(args.dac_mv) != 0) {
@@ -101,12 +102,10 @@ int main(int argc, char **argv)
         if (args.max_seconds > 0 && (time(NULL) - start_time) >= args.max_seconds) break;
         if (args.max_hits    > 0 && hits_sent >= args.max_hits) break;
 
-        while (!(read_reg(dma_ctrl, S2MM_SR) & S2MM_SR_IDLE)) {
-            if (!keep_running) break;
-            usleep(POLL_SLEEP_US);
-        }
-        if (!keep_running) break;
-
+        /* The channel is ready for a new transfer here: it was just started,
+         * or the previous transfer completed. Do not wait for the Idle status
+         * bit, which in direct-register mode is only set once a transfer has
+         * completed and so never before the first one. */
         write_reg(dma_ctrl, S2MM_DA, DMA_RAM_BASE + ram_offset);
         write_reg(dma_ctrl, S2MM_LENGTH, PACKET_SIZE_BYTES);
 
@@ -114,8 +113,15 @@ int main(int argc, char **argv)
 
         int watchdog = 0;
         int dma_error = 0;
+        int timed_out = 0;
         while (!(read_reg(dma_ctrl, S2MM_SR) & S2MM_SR_IOC)) {
             if (!keep_running) break;
+            /* A packet only completes after 90 hits, so the time limit has to
+             * be checked while waiting as well. */
+            if (args.max_seconds > 0 && (time(NULL) - start_time) >= args.max_seconds) {
+                timed_out = 1;
+                break;
+            }
             usleep(POLL_SLEEP_US);
             if (++watchdog >= WATCHDOG_TICKS) {
                 uint32_t sr = read_reg(dma_ctrl, S2MM_SR);
@@ -128,7 +134,7 @@ int main(int argc, char **argv)
                 watchdog = 0;
             }
         }
-        if (!keep_running) break;
+        if (!keep_running || timed_out) break;
         if (dma_error) continue;
 
         write_reg(dma_ctrl, S2MM_SR, S2MM_SR_IOC);

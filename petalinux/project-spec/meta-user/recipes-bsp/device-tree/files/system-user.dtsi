@@ -1,3 +1,19 @@
 /include/ "system-conf.dtsi"
 / {
+	/*
+	 * Buffer that yeet-data-tdc hands to the AXI DMA and maps through
+	 * /dev/mem. It must be kept out of the kernel's memory, or the DMA
+	 * overwrites pages Linux is using. Keep in step with DMA_RAM_BASE and
+	 * DMA_RAM_SIZE in sw/common/reg_io.h.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		scam_dma_buffer: scam-dma-buffer@70000000 {
+			reg = <0x0 0x70000000 0x0 0x00100000>;
+			no-map;
+		};
+	};
 };

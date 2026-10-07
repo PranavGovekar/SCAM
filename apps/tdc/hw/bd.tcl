@@ -1,49 +1,5 @@
-# Build the TDC application from the reusable base block-design template.
-# Run from any directory with: vivado -mode batch -source <this file>
-
-set app_dir [file dirname [file normalize [info script]]]
-set base_script [file normalize [file join $app_dir .. base build_base_xsa.tcl]]
-set base_project_dir [file join $app_dir .. base build scam_base_project]
-set base_project_xpr [file join $base_project_dir scam_base.xpr]
-set proj_name scam_tdc
-set build_dir [file normalize [expr {[info exists ::env(SCAM_BUILD_DIR)] ? $::env(SCAM_BUILD_DIR) : [file join $app_dir build ${proj_name}_project]}]]
-set ::SCAM_APP_PROJECT_NAME $proj_name
-set ::SCAM_APP_BUILD_DIR $build_dir
-
-# The editable Vivado project is the template. If needed, generate it once;
-# then use Vivado's project-save operation to make this app's independent copy.
-if {![file exists $base_project_xpr]} {
-    set had_build_override [info exists ::env(SCAM_BUILD_DIR)]
-    if {$had_build_override} {
-        set requested_build_dir $::env(SCAM_BUILD_DIR)
-        unset ::env(SCAM_BUILD_DIR)
-    }
-    set ::SCAM_TEMPLATE_ONLY 1
-    source $base_script
-    unset ::SCAM_TEMPLATE_ONLY
-    close_project
-    if {$had_build_override} {
-        set ::env(SCAM_BUILD_DIR) $requested_build_dir
-    }
-}
-open_project $base_project_xpr
-save_project_as -force -exclude_run_results $::SCAM_APP_PROJECT_NAME $::SCAM_APP_BUILD_DIR
-close_project
-open_project [file join $::SCAM_APP_BUILD_DIR ${::SCAM_APP_PROJECT_NAME}.xpr]
-set build_dir $::SCAM_APP_BUILD_DIR
-
-set vhd_files [glob -nocomplain [file join $app_dir src *.vhd]]
-if {[llength $vhd_files] == 0} {
-    error "No TDC VHDL sources found under [file join $app_dir src]"
-}
-add_files -norecurse $vhd_files
-# Module Reference in IP Integrator requires these sources to be classified
-# as standard VHDL, even when the RTL uses VHDL-2008 constructs.
-set_property file_type VHDL [get_files $vhd_files]
-update_compile_order -fileset sources_1
-add_files -fileset constrs_1 -norecurse [file join $app_dir constraints tdc.xdc]
-
-open_bd_design [get_files base.bd]
+# TDC block-design edits, sourced by hw/base/scam_app.tcl with base.bd open.
+# The RTL in src/ and the constraints in constraints/ are already added.
 
 # Replace the base design's idle AXI4-Stream master with the TDC master.
 delete_bd_objs [get_bd_cells idle_axis_source]
@@ -118,18 +74,3 @@ connect_bd_net [get_bd_pins axi_gpio_ctrl/gpio_io_o] [get_bd_pins slice_enable/D
 connect_bd_net [get_bd_pins slice_enable/Dout] [get_bd_pins u_tdc_top/en_i]
 connect_bd_net [get_bd_pins u_tdc_top/fifo_overflow_count_o] [get_bd_pins axi_gpio_status/gpio_io_i]
 connect_bd_intf_net [get_bd_intf_pins u_tdc_top/M_AXIS] [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM]
-
-regenerate_bd_layout
-validate_bd_design
-save_bd_design
-make_wrapper -files [get_files base.bd] -top -force
-set_property top base_wrapper [current_fileset]
-update_compile_order -fileset sources_1
-
-launch_runs impl_1 -to_step write_bitstream -jobs 8
-wait_on_run impl_1
-open_run impl_1
-set bitstream_dir [file normalize [expr {[info exists ::env(SCAM_BITSTREAM_DIR)] ? $::env(SCAM_BITSTREAM_DIR) : [file join $app_dir bitstream]}]]
-file mkdir $bitstream_dir
-write_bitstream -force [file join $bitstream_dir tdc.bit]
-puts "TDC bitstream written to [file join $bitstream_dir tdc.bit]"

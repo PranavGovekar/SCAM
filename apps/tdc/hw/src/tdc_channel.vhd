@@ -52,8 +52,8 @@ architecture rtl of tdc_channel is
     signal fifo_full         : std_logic;
     signal fifo_empty        : std_logic;
 
-    -- Per-hit write permit -- blocks repeated writes during one pulse.
-    signal hit_prev          : std_logic := '0';
+    -- Per-hit write permit: set when the start line captures a rising edge,
+    -- so a record is only written for a measurement that has its own start.
     signal write_armed       : std_logic := '0';
 
 begin
@@ -136,15 +136,15 @@ begin
                 read_done_sig    <= '0';
                 ctrl_valid_q     <= '0';
                 overflow_pulse_o <= '0';
-                hit_prev         <= '0';
                 write_armed      <= '0';
             else
                 fifo_wren        <= '0';
                 overflow_pulse_o <= '0';
 
-                -- Arm on physical hit rising edge
-                hit_prev <= hit_i;
-                if (hit_i = '1' and hit_prev = '0') then
+                -- Arm when the capture controller latches a start. This comes
+                -- from the edge-triggered delay line, so it also holds for
+                -- pulses shorter than one clk_fast period.
+                if enc_start_trig = '1' then
                     write_armed <= '1';
                 end if;
 

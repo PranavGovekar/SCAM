@@ -22,8 +22,8 @@ Run in order. Each step must pass before the next is attempted.
 - Inject a known pattern into the differential SMA inputs from a pulse
   generator (e.g. 10 ns width, 1 kHz repetition, two channels with a
   fixed delay between them).
-- Run `sudo yeet-data-tdc -n 900 192.168.1.100`.
-- Host: `python collect_data.py -n 900 192.168.1.100 -o tdc.csv`.
+- Host: `python collect_data.py -n 900 <board-ip> -o tdc.csv`
+  (it logs in as `petalinux` and starts `yeet-data-tdc` on the board).
 - Verify: hit count matches expected, timestamp deltas match the pulse
   generator delay.
 
@@ -37,8 +37,8 @@ Run in order. Each step must pass before the next is attempted.
 
 - Inject 4 pulse trains from a pattern generator, all within a 20 ns
   window.
-- Run `sudo yeet-data-ct -n 900 192.168.1.100`.
-- Host: `python collect_data.py -n 900 192.168.1.100 -o ct.csv`.
+- Host: `python collect_data.py --app ct -n 900 <board-ip> -o ct.csv`
+  (it logs in as `petalinux` and starts `yeet-data-ct` on the board).
 - Verify: coinc_out bit 14 (ABCD) is high on every event.
 
 ## 6. Boundary behavior

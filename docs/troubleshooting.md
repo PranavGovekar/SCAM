@@ -5,9 +5,9 @@
 The device tree is generated from the base XSA. If you swapped XSAs or
 edited `system-user.dtsi`, regenerate:
 
-    cd petalinux
-    petalinux-config --get-hw-description ../hw/base/build/
-    petalinux-build
+    make base-xsa
+    make petalinux-config
+    make petalinux
 
 ## Kernel hangs at boot
 
@@ -45,4 +45,47 @@ loaded:
 
 The FIFO read is asynchronous to the AXI clock. After pulsing the pop
 bit, wait at least 1 us before reading status. See
-`sw/ct/yeet-data-ct.c` for the exact sequence.
+`apps/ct/sw/yeet-data-ct.c` for the exact sequence.
+
+## Bitstream build stops with "PL contract violated"
+
+Your `hw/bd.tcl` changed something the Linux image depends on: an AXI
+address, a clock frequency, or the DMA interrupt, or it added an AXI
+peripheral. The message lists each difference. See `pl-contract.md`.
+
+## `make app-<name>` says "No cross compiler"
+
+Install the SDK (`sh scam-zcu102-<version>-sdk.sh -d ~/scam-sdk`) and pass
+`SCAM_SDK=~/scam-sdk`, or put it in `config.mk`.
+
+## Vivado is not found, or fails to start
+
+Set `VIVADO_SETTINGS` in `config.mk` to Vivado's `settings64.sh`. Without it
+the build uses a `vivado` shell function from `~/.bashrc` if there is one,
+otherwise `vivado` on `PATH`.
+
+## PetaLinux in the container
+
+- **`[ERROR]` with no text at `oe-init-build-env`.** The eSDK under
+  `.cache/petalinux-2024.1-ubuntu22/components/` is incomplete. Run
+  `make clean-container-state`, then `make petalinux-config`.
+- **"No XSA/DTS found".** `petalinux-config` empties
+  `project-spec/hw-description/` before copying the XSA in, so the XSA must
+  never be stored there. It lives at `hw/base/system.xsa`.
+- **`[Errno 21] Is a directory: .../components/yocto/.statistics/`.** The
+  PetaLinux installation is mounted read-only and needs the writable
+  `.statistics` overlay that `scripts/build_petalinux_container.sh` sets up.
+  Do not mount the installation by hand.
+- **"Error during writing of the configuration".** Kconfig cannot replace the
+  bind-mounted config file. The wrapper sets `KCONFIG_OVERWRITECONFIG=1` for
+  this.
+- **A source download fails.** Run `make fetch-check`: it downloads every
+  source without compiling and prints a `wget` line for each one that is
+  missing. `CONFIG_PRE_MIRROR_URL` in `config.template` must stay set; the
+  comment there explains why.
+
+## Images are missing from `petalinux/images/linux`
+
+`petalinuxbsp.conf` sets `PLNX_DEPLOY_DIR` to that directory. Without it
+PetaLinux 2024.1 writes images to `petalinux/build/images/linux`, where
+`petalinux-package` and `make sdcard` do not look.

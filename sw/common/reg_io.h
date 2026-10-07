@@ -15,6 +15,11 @@
 
 #define REG_SIZE            0x1000
 
+/* DDR set aside for AXI DMA transfers. Reserved (no-map) in the device tree:
+ * petalinux/project-spec/meta-user/recipes-bsp/device-tree/files/system-user.dtsi */
+#define DMA_RAM_BASE        0x70000000UL
+#define DMA_RAM_SIZE        0x00100000UL
+
 /* Common register offsets */
 #define GPIO_DATA           0x00
 #define GPIO_TRI            0x04
@@ -41,7 +46,7 @@
 #define CTRL_CLEAR          0x02  /* bit1=1 (release reset), bit0=0 */
 #define CTRL_WAKEUP         0x03  /* bit1=1, bit0=1 (enable) */
 
-/* mmap helper */
+/* mmap helper. Returns MAP_FAILED after printing the reason. */
 void *map_phys(uint32_t base, size_t size);
 
 static inline void write_reg(void *base, uint32_t off, uint32_t val)

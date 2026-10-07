@@ -96,6 +96,14 @@ begin
                                 encode_start_o <= '1';
                                 start_coarse_o <= global_time_i;
                                 state          <= S_MEASURING;
+                            elsif taps_stop_p1(0) = '1' then
+                                -- Stop without a start: the input was still
+                                -- high when the lines were released, so this
+                                -- falling edge belongs to a pulse whose rising
+                                -- edge was not captured. Discard it and re-arm
+                                -- so it cannot be paired with the next hit.
+                                tdl_rst_o <= '1';
+                                state     <= S_REARM;
                             end if;
                         when S_MEASURING =>
                             if taps_stop_p1(0) = '1' then

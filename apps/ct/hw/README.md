@@ -16,9 +16,9 @@ AXI footprint: unchanged from base. All configuration goes through
 
 ## Build
 
-    make ct
+    make ct-bitstream
 
-Produces `hw/ct/bitstream/coincidence.bit.bin`.
+Produces `build/apps/ct/coincidence.bit.bin`. The block-design edits are in `bd.tcl`.
 
 ## GPIO assignments
 

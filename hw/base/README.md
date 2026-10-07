@@ -12,8 +12,8 @@ No application IP.
 The Vivado project is the editable template. Open
 `hw/base/build/scam_base_project/scam_base.xpr` in Vivado, or recreate it by
 running `make base-xsa`. The XSA is an export for PetaLinux, not the editable
-Vivado project. `make base-xsa` copies it to
-`petalinux/project-spec/hw-description/system.xsa`.
+Vivado project. It is written to `hw/base/system.xsa`; `make petalinux-config`
+imports it from there.
 
 ## Contents
 
@@ -28,9 +28,15 @@ Vivado project. `make base-xsa` copies it to
 - `clk_wiz_0` (100 MHz in, 400 MHz + 200 MHz out)
 - `proc_sys_reset_0`
 
-Application build scripts use Vivado's project-save operation to clone this
-template into their own project folders, then add application logic without
-changing the six AXI addresses, DMA stream/interrupt, or PS clock setup. Saved
-changes to this template are therefore inherited by later TDC/CT builds.
-`make clean` keeps this template project. To recreate it from the checked-in
-TCL sources and discard GUI edits, run `SCAM_REBUILD_TEMPLATE=1 make base-xsa`.
+## Application builds
+
+`scam_app.tcl` builds one application's bitstream (`make <app>-bitstream`). It
+uses Vivado's project-save operation to clone this template into
+`build/apps/<app>/vivado/`, adds the application's RTL and constraints, sources
+its `hw/bd.tcl`, checks the PL contract (six AXI addresses, clocks, DMA
+interrupt), and runs implementation. Saved changes to this template are
+therefore inherited by later application builds.
+
+`make base-xsa` reuses an existing template project so that GUI edits survive.
+To recreate it from the checked-in TCL sources and discard GUI edits, run
+`SCAM_REBUILD_TEMPLATE=1 make -B base-xsa`. `make clean` removes the template.

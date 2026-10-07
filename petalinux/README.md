@@ -5,13 +5,17 @@ Standard PetaLinux project layout. The generated files (`build/`,
 
 ## First-time setup
 
-    make base-xsa          # produces system.xsa
+    make base-xsa          # produces hw/base/system.xsa
     make petalinux-config  # imports the XSA, produces config fragments
     make petalinux
+    make sdcard            # BOOT.BIN, SD image, ./out/
+
+Images are written to `images/linux/`.
 
 ## Adding an application
 
-See `../docs/build-guide.md`.
+Applications normally do not need a PetaLinux build at all. To bake one into
+the image, see `../docs/adding-an-app.md`.
 
 ## Do not commit
 

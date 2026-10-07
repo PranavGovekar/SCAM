@@ -9,14 +9,14 @@ Shared C headers and helpers used by both userspace applications.
 | `args.h`, `args.c`     | Shared `-n`/`-t`/`-v` CLI parsing. |
 | `i2c_dac.h`, `i2c_dac.c` | DAC5578 threshold setup over PS I2C1 (`/dev/i2c-1`). |
 
-The two application Makefiles compile these files directly. There is no
-shared library in the source tree — PetaLinux packages them once via the
-`yeet-data-common` recipe and both apps link against the resulting
+`app.mk` holds the build rules shared by every application's `sw/Makefile`. It
+compiles all `*.c` files here directly into each application binary. There is
+no shared library in the source tree — inside PetaLinux the `yeet-data-common`
+recipe packages them once and the baked-in apps link against the resulting
 `libscam_common.a`.
 
 ## Adding a helper
 
-Add the `.h`/`.c` pair here, then update both `sw/tdc/Makefile` and
-`sw/ct/Makefile` to include the new file. The BitBake recipe
-`yeet-data-common.bb` will pick up the source automatically (SRC_URI
-lists each file explicitly — update that too).
+Add the `.h`/`.c` pair here; `app.mk` picks it up automatically. For the
+PetaLinux image, also list the new files in `yeet-data-common.bb` (`SRC_URI`,
+`do_compile`, `do_install`).

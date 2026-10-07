@@ -1,1 +1,2 @@
-Place yeet-data-tdc.c here (copy from ../../../../../../sw/tdc/).
+yeet-data-tdc.c is staged here from apps/tdc/sw/ by scripts/stage_assets.sh
+on every PetaLinux build. Do not edit the copy.
