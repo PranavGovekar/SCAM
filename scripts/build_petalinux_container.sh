@@ -65,7 +65,7 @@ MSG
 fi
 # Applications outside the repository must be visible at the same path.
 IFS=':' read -r -a extra_roots <<< "${SCAM_APPS:-}"
-for root in "${extra_roots[@]}"; do
+for root in ${extra_roots[@]+"${extra_roots[@]}"}; do
     [[ -d "$root" ]] || continue
     root="$(cd "$root" && pwd)"
     docker_args+=(--mount "type=bind,src=$root,dst=$root,readonly")

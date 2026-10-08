@@ -58,8 +58,9 @@ scan_root() {
 }
 
 scan_root "$SCAM_ROOT/apps"
+# ${a[@]+"${a[@]}"} below: bash before 4.4 (CentOS 7) rejects an empty array under set -u.
 IFS=':' read -r -a extra_roots <<< "${SCAM_APPS:-}"
-for root in "${extra_roots[@]}"; do
+for root in ${extra_roots[@]+"${extra_roots[@]}"}; do
     [[ -n "$root" ]] || continue
     # A missing entry must not block targets such as clean or new-app.
     if [[ ! -d "$root" ]]; then
@@ -102,12 +103,12 @@ case "$cmd" in
         ;;
     table)
         # One word per application for the Makefile: name|dir|bitstream|binary|hw|sw
-        for name in "${app_names[@]}"; do
+        for name in ${app_names[@]+"${app_names[@]}"}; do
             echo "$name|${app_dirs[$name]}|$(app_get "$name" bitstream)|$(app_get "$name" binary)|$(app_get "$name" has_hw)|$(app_get "$name" has_sw)"
         done
         ;;
     show)
-        for name in "${app_names[@]}"; do
+        for name in ${app_names[@]+"${app_names[@]}"}; do
             printf '%-12s %s\n' "$name" "${app_dirs[$name]}"
             [[ "$(app_get "$name" has_hw)" == 1 ]] && \
                 printf '             bitstream  %s.bit.bin\n' "$(app_get "$name" bitstream)"
