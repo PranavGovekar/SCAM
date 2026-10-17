@@ -28,6 +28,14 @@ set_property PACKAGE_PIN M13 [get_ports diff_in_n_1]
 set_property IOSTANDARD LVDS [get_ports diff_in_n_1]
 set_property DIFF_TERM_ADV TERM_100 [get_ports diff_in_p_1]
 
+# Calibration input: FMC DIO card channel 2 (LA16), as CT input C.
+set_property PACKAGE_PIN Y12 [get_ports cal_in_p]
+set_property IOSTANDARD LVDS [get_ports cal_in_p]
+set_property PACKAGE_PIN AA12 [get_ports cal_in_n]
+set_property IOSTANDARD LVDS [get_ports cal_in_n]
+set_property DIFF_TERM_ADV TERM_100 [get_ports cal_in_p]
+set_property DIFF_TERM_ADV TERM_100 [get_ports cal_in_n]
+
 # Channel control pins: oe = output enable, term = termination enable
 set_property PACKAGE_PIN V6  [get_ports {oe[0]}]
 set_property PACKAGE_PIN K12 [get_ports {oe[1]}]
@@ -60,8 +68,10 @@ set_property IOSTANDARD LVCMOS33 [get_ports {led_in[*]}]
 # A. The raw hits act as asynchronous clocks.
 create_clock -period 10.000 -name hit_0_clk [get_ports diff_in_p_0]
 create_clock -period 10.000 -name hit_1_clk [get_ports diff_in_p_1]
+create_clock -period 10.000 -name cal_clk   [get_ports cal_in_p]
 set_clock_groups -asynchronous -group [get_clocks hit_0_clk]
 set_clock_groups -asynchronous -group [get_clocks hit_1_clk]
+set_clock_groups -asynchronous -group [get_clocks cal_clk]
 
 # B. Relax timing across the 100MHz/400MHz boundary (manual synchronizers).
 # Clock names are obtained from the actual PS and MMCM pins in the generated
@@ -104,5 +114,8 @@ set_property IS_SOFT false [get_pblocks pblock_ch1_stop]
 # =============================================================================
 # 4. ASYNCHRONOUS HIT ROUTING CONSTRAINTS
 # =============================================================================
-# Prevent Vivado from routing the raw hits onto global clock trees.
+# Prevent Vivado from routing the raw hits onto global clock trees. The
+# calibration input is a hit too. (The input mux ends up in the LUT in front
+# of each launch flip-flop, as the stop line's inverter already was.)
 set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -hierarchical -filter {NAME =~ *u_tdc_top/hit_i*}]
+set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -hierarchical -filter {NAME =~ *u_tdc_top/cal_hit_i*}]

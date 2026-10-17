@@ -21,7 +21,16 @@ entity tdc_channel is
         valid_o          : out std_logic;
         ready_i          : in  std_logic;
 
-        overflow_pulse_o : out std_logic
+        overflow_pulse_o : out std_logic;
+
+        -- Calibration mode (clk_fast domain, changed by tdc_top only while the
+        -- channel is disabled): records go to the calibration FIFO, tagged
+        -- with channel ID x"800" + channel.
+        cal_sel_i            : in  std_logic;
+        cal_data_o           : out std_logic_vector(127 downto 0);
+        cal_valid_o          : out std_logic;
+        cal_ready_i          : in  std_logic;
+        cal_overflow_pulse_o : out std_logic
     );
 end tdc_channel;
 
@@ -55,6 +64,11 @@ architecture rtl of tdc_channel is
     -- Per-hit write permit: set when the start line captures a rising edge,
     -- so a record is only written for a measurement that has its own start.
     signal write_armed       : std_logic := '0';
+
+    signal cal_din           : std_logic_vector(127 downto 0);
+    signal cal_wren          : std_logic := '0';
+    signal cal_full          : std_logic;
+    signal cal_empty         : std_logic;
 
 begin
 
@@ -128,18 +142,24 @@ begin
         );
 
     process(clk_fast_i)
+        variable record_v : std_logic_vector(115 downto 0);
     begin
         if rising_edge(clk_fast_i) then
             if rst_i = '1' then
                 fifo_wren        <= '0';
                 fifo_din         <= (others => '0');
+                cal_wren         <= '0';
+                cal_din          <= (others => '0');
                 read_done_sig    <= '0';
                 ctrl_valid_q     <= '0';
                 overflow_pulse_o <= '0';
+                cal_overflow_pulse_o <= '0';
                 write_armed      <= '0';
             else
                 fifo_wren        <= '0';
+                cal_wren         <= '0';
                 overflow_pulse_o <= '0';
+                cal_overflow_pulse_o <= '0';
 
                 -- Arm when the capture controller latches a start. This comes
                 -- from the edge-triggered delay line, so it also holds for
@@ -152,12 +172,21 @@ begin
 
                 if (ctrl_valid = '1' and ctrl_valid_q = '0' and write_armed = '1') then
                     write_armed <= '0';
-                    if fifo_full = '0' then
-                        fifo_din <= std_logic_vector(to_unsigned(G_CHANNEL_ID, 12)) &
-                                    stop_coarse_snap  &
-                                    bin_stop_fine     &
-                                    start_coarse_snap &
-                                    bin_start_fine;
+                    record_v := stop_coarse_snap  &
+                                bin_stop_fine     &
+                                start_coarse_snap &
+                                bin_start_fine;
+                    if cal_sel_i = '1' then
+                        -- Calibration FIFO full: the hit is dropped. Which hits
+                        -- are dropped does not depend on their phase.
+                        if cal_full = '0' then
+                            cal_din  <= std_logic_vector(to_unsigned(16#800# + G_CHANNEL_ID, 12)) & record_v;
+                            cal_wren <= '1';
+                        else
+                            cal_overflow_pulse_o <= '1';
+                        end if;
+                    elsif fifo_full = '0' then
+                        fifo_din  <= std_logic_vector(to_unsigned(G_CHANNEL_ID, 12)) & record_v;
                         fifo_wren <= '1';
                     else
                         overflow_pulse_o <= '1';
@@ -213,5 +242,46 @@ begin
         );
 
     valid_o <= not fifo_empty;
+
+    cal_fifo_inst : xpm_fifo_async
+        generic map (
+            FIFO_MEMORY_TYPE  => "auto",
+            ECC_MODE          => "no_ecc",
+            FIFO_WRITE_DEPTH  => 512,
+            WRITE_DATA_WIDTH  => 128,
+            READ_DATA_WIDTH   => 128,
+            PROG_EMPTY_THRESH => 10,
+            PROG_FULL_THRESH  => 10,
+            READ_MODE         => "fwft",
+            USE_ADV_FEATURES  => "0000"
+        )
+        port map (
+            sleep           => '0',
+            rst             => rst_i,
+            wr_clk          => clk_fast_i,
+            wr_en           => cal_wren,
+            din             => cal_din,
+            full            => cal_full,
+            rd_clk          => clk_sys_i,
+            rd_en           => cal_ready_i,
+            dout            => cal_data_o,
+            empty           => cal_empty,
+            injectdbiterr   => '0',
+            injectsbiterr   => '0',
+            prog_empty      => open,
+            prog_full       => open,
+            rd_data_count   => open,
+            wr_data_count   => open,
+            almost_empty    => open,
+            almost_full     => open,
+            data_valid      => open,
+            dbiterr         => open,
+            sbiterr         => open,
+            overflow        => open,
+            underflow       => open,
+            wr_ack          => open
+        );
+
+    cal_valid_o <= not cal_empty;
 
 end rtl;

@@ -7,10 +7,11 @@ delete_bd_objs [get_bd_cells idle_axis_source]
 create_bd_cell -type module -reference tdc_top u_tdc_top
 create_bd_cell -type module -reference diff_to_se_1ch u_diff_ch0
 create_bd_cell -type module -reference diff_to_se_1ch u_diff_ch1
+create_bd_cell -type module -reference diff_to_se_1ch u_diff_cal
 create_bd_cell -type module -reference heartbeat_led u_hb_led
 create_bd_cell -type module -reference led_controller u_led_ctrl
 
-foreach name {diff_in_p_0 diff_in_n_0 diff_in_p_1 diff_in_n_1} {
+foreach name {diff_in_p_0 diff_in_n_0 diff_in_p_1 diff_in_n_1 cal_in_p cal_in_n} {
     create_bd_port -dir I -type data $name
 }
 foreach name {led_0 led_1 led_2 led_3} {
@@ -23,6 +24,9 @@ connect_bd_net [get_bd_ports diff_in_p_0] [get_bd_pins u_diff_ch0/diff_in_p]
 connect_bd_net [get_bd_ports diff_in_n_0] [get_bd_pins u_diff_ch0/diff_in_n]
 connect_bd_net [get_bd_ports diff_in_p_1] [get_bd_pins u_diff_ch1/diff_in_p]
 connect_bd_net [get_bd_ports diff_in_n_1] [get_bd_pins u_diff_ch1/diff_in_n]
+connect_bd_net [get_bd_ports cal_in_p] [get_bd_pins u_diff_cal/diff_in_p]
+connect_bd_net [get_bd_ports cal_in_n] [get_bd_pins u_diff_cal/diff_in_n]
+connect_bd_net [get_bd_pins u_diff_cal/se_out] [get_bd_pins u_tdc_top/cal_hit_i]
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:xlconcat:2.1 xlconcat_hits
 set_property CONFIG.NUM_PORTS {2} [get_bd_cells xlconcat_hits]
@@ -61,6 +65,10 @@ set_property -dict [list CONFIG.DIN_WIDTH {2} CONFIG.DIN_FROM {0} CONFIG.DIN_TO 
 connect_bd_net [get_bd_pins axi_gpio_ctrl/gpio_io_o] [get_bd_pins slice_enable/Din]
 connect_bd_net [get_bd_pins slice_enable/Dout] [get_bd_pins u_tdc_top/en_i]
 connect_bd_net [get_bd_pins u_tdc_top/fifo_overflow_count_o] [get_bd_pins axi_gpio_status/gpio_io_i]
+# Calibration: request bit from config ch1, drop counter and state back.
+connect_bd_net [get_bd_pins axi_gpio_config/gpio_io_o] [get_bd_pins u_tdc_top/config_i]
+connect_bd_net [get_bd_pins u_tdc_top/cal_status_o] [get_bd_pins axi_gpio_status2/gpio_io_i]
+connect_bd_net [get_bd_pins u_tdc_top/flags_o] [get_bd_pins axi_gpio_flags/gpio_io_i]
 connect_bd_intf_net [get_bd_intf_pins u_tdc_top/M_AXIS] [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM]
 
 # Input monitor LEDs: the two inputs wired straight to user LEDs 3 and 4.

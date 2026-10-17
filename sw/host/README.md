@@ -50,6 +50,9 @@ arrive and decoded at the end, so a fast stream is not slowed down.
     --user USER   SSH user on the board (default: petalinux)
     --password P  SSH and sudo password (default: petalinux)
     --no-ssh      do not start the board program, just listen
+    --cal-window S  TDC: calibrate for S seconds first (calibration input,
+                    FMC DIO card channel 2)
+    --cal-every S   TDC: calibrate again every S seconds
 
 Output in the run folder: `hits.csv` and `run.txt` (settings, the board's
 summary, packets received and, for the TDC, how many were lost).
@@ -62,6 +65,18 @@ Coarse values count 400 MHz clock cycles (2.5 ns). Fine values are delay-line
 codes: how far the edge travelled before the next clock edge (larger =
 earlier). The decoder (`parse_tdc`) follows the 128-bit word that
 `apps/tdc/hw/src/tdc_channel.vhd` writes; packets are 1440 bytes (90 hits).
+
+With `--cal-window`, the board calibrates its delay lines and sends the
+tables in calibration packets (format in `apps/tdc/sw/README.md`). Each
+calibration is saved as `calibrations/cal_<n>.json` in the format
+`test_tdc.py --cal` reads, with the quality flags of each line and
+`first_hit_row`: the number of `hits.csv` rows that came before it, so the
+hits from that row on were taken after it. `run.txt` and the screen list each
+calibration. A line whose packet was lost is listed as incomplete and not
+saved.
+
+    python sw/host/collect_data.py -v 250 -n 1000000 --cal-window 1 data-yeeter.local
+    python sw/host/test_tdc.py --csv data/<run>/hits.csv --cal data/<run>/calibrations/cal_000.json
 
 CT CSV (one 8-byte packet per event, decoded by `parse_ct`):
 

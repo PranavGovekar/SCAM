@@ -6,7 +6,7 @@ Shared C headers and helpers used by both userspace applications.
 | :-- | :-- |
 | `reg_io.h`, `reg_io.c` | `/dev/mem` mapping + register read/write helpers. Includes the fixed AXI address map. |
 | `udp.h`, `udp.c`       | Minimal UDP sender used by both applications. |
-| `args.h`, `args.c`     | Shared `-n`/`-t`/`-v` CLI parsing. |
+| `args.h`, `args.c`     | Shared `-n`/`-t`/`-v` CLI parsing; `args_parse_cal` adds the TDC calibration options `-c`/`-C`. |
 | `i2c_dac.h`, `i2c_dac.c` | DAC5578 threshold setup over PS I2C1 (`/dev/i2c-1`). |
 
 `app.mk` holds the build rules shared by every application's `sw/Makefile`. It
