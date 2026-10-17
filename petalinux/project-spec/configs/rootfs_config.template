@@ -1,0 +1,43 @@
+#
+# SCAM rootfs config template.
+# 'make petalinux-config' copies this to rootfs_config.
+#
+# Only names from PetaLinux's rootfs menu work here; any other line is dropped
+# without a message. After a build, check petalinux/images/linux/rootfs.manifest.
+#
+
+# The base system: systemd (init), busybox, udev, serial login, networking.
+# Without packagegroup-core-boot the image has no init and cannot boot.
+CONFIG_packagegroup-core-boot=y
+CONFIG_run-postinsts=y
+CONFIG_udev-extraconf=y
+CONFIG_linux-xlnx-udev-rules=y
+CONFIG_packagegroup-petalinux=y
+
+# fpgautil. Bitstreams are loaded with scam-load (fpga-load recipe).
+CONFIG_fpga-manager-script=y
+
+# SSH + sudo
+CONFIG_imagefeature-ssh-server-openssh=y
+CONFIG_openssh-sshd=y
+CONFIG_openssh-sftp-server=y
+CONFIG_sudo=y
+
+# Python for quick scripting on target
+CONFIG_python3=y
+CONFIG_python3-modules=y
+
+# Login. The image has no usable root password, so this account is the way in
+# (serial console and SSH). Change the password after first boot: passwd
+CONFIG_ADD_EXTRA_USERS="petalinux:petalinux;"
+CONFIG_ADD_USERS_TO_GROUPS="petalinux:audio,video,dialout;"
+CONFIG_ADD_USERS_TO_SUDOERS="petalinux"
+
+# Utilities
+CONFIG_dosfstools=y
+CONFIG_e2fsprogs=y
+CONFIG_util-linux-mount=y
+CONFIG_procps=y
+CONFIG_i2c-tools=y
+CONFIG_avahi-daemon=y
+# devmem2 is not in the menu; it is added in petalinux-image-minimal.bbappend.

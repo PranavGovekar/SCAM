@@ -1,0 +1,35 @@
+#!/bin/sh
+# Load a bitstream into the PL: scam-load <name>
+# loads /lib/firmware/<name>.bit.bin, for example: scam-load tdc
+#
+# This writes to the kernel's FPGA manager directly. Do not use
+# 'fpgautil -b /lib/firmware/<name>.bit.bin' for this: fpgautil deletes the
+# file from /lib/firmware once it has loaded it.
+
+mgr=/sys/class/fpga_manager/fpga0
+name="${1:-}"
+
+if [ -z "$name" ] || [ ! -f "/lib/firmware/$name.bit.bin" ]; then
+    echo "Usage: $0 <name>" >&2
+    echo "Available:" >&2
+    for f in /lib/firmware/*.bit.bin; do
+        [ -f "$f" ] && echo "  $(basename "$f" .bit.bin)" >&2
+    done
+    exit 1
+fi
+
+if [ "$(id -u)" != 0 ]; then
+    exec sudo "$0" "$@"
+fi
+
+# flags 0 = full (not partial) bitstream
+if ! echo 0 > "$mgr/flags" || ! echo "$name.bit.bin" > "$mgr/firmware"; then
+    echo "Loading $name.bit.bin failed (see dmesg)." >&2
+    exit 1
+fi
+state="$(cat "$mgr/state")"
+if [ "$state" != operating ]; then
+    echo "Loading $name.bit.bin failed: FPGA manager state is '$state' (see dmesg)." >&2
+    exit 1
+fi
+echo "Loaded $name.bit.bin"

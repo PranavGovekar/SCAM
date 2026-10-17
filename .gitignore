@@ -1,0 +1,65 @@
+# Vivado
+*.jou
+*.log
+*.xsa
+*.bit
+.Xil/
+vivado*.str
+vivado*.zip
+*.bif
+build/
+hw/base/build/
+
+# PetaLinux
+petalinux/build/
+petalinux/.petalinux/
+petalinux/images/
+petalinux/components/
+petalinux/project-spec/configs/config
+petalinux/project-spec/configs/config.old
+petalinux/project-spec/configs/rootfs_config
+petalinux/project-spec/configs/rootfs_config.old
+petalinux/project-spec/configs/.statistics
+petalinux/project-spec/configs/plnx_syshw_data
+petalinux/project-spec/configs/attributes
+petalinux/project-spec/configs/*.old
+petalinux/project-spec/configs/*.log
+petalinux/project-spec/configs/*.log.*
+petalinux/project-spec/configs/configs/
+petalinux/project-spec/configs/busybox/
+petalinux/project-spec/configs/init-ifupdown/
+petalinux/project-spec/configs/rootfsconfigs/
+petalinux/project-spec/configs/flash_parts.txt
+petalinux/project-spec/attributes
+petalinux/project-spec/hw-description/psu_init*.*
+petalinux/project-spec/configs/systemd-conf/
+# Staged from sw/common and apps/*/sw by scripts/stage_assets.sh
+petalinux/project-spec/meta-user/recipes-apps/*/files/*.c
+petalinux/project-spec/meta-user/recipes-apps/*/files/*.h
+
+# Build outputs
+out/
+.cache/
+config.mk
+*.o
+*.elf
+*.bin
+!petalinux/project-spec/meta-user/recipes-bsp/fpga-bitstreams/files/*.bin
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+petalinux/project-spec/meta-user/recipes-bsp/fpga-bitstreams/files/*.bit.bin
+
+# Python virtual environment for the host collector
+sw/host/.venv/
+
+# Captures; one folder per run (see data/README.md)
+data/*
+!data/README.md
+
+# Python bytecode
+__pycache__/

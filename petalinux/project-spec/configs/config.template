@@ -1,0 +1,33 @@
+#
+# SCAM PetaLinux config template.
+# 'make petalinux-config' copies this to config and then runs
+# petalinux-config --get-hw-description, which fills in the hardware
+# derived fragments below.
+#
+CONFIG_SUBSYSTEM_MACHINE_NAME="zcu102-rev1.0"
+CONFIG_SUBSYSTEM_PRODUCT="zcu102_rev1_0"
+# Seed the architecture before gen-machineconf checks the installed eSDK.
+CONFIG_SYSTEM_ZYNQMP=y
+CONFIG_SUBSYSTEM_ARCH_AARCH64=y
+
+# Networking: no MAC address set here. PetaLinux then leaves the address to
+# U-Boot, which reads the board's own from its EEPROM, so one image can run on
+# several boards on the same network.
+# The host name and DHCP/static address are not set here: they come from
+# SCAM_HOSTNAME, SCAM_IP and SCAM_GATEWAY in config.mk, and
+# scripts/build_petalinux.sh writes them into config on every build.
+
+# Source download mirror.
+# Must NOT be left empty: an empty value makes gen-machineconf emit 13 PREMIRRORS
+# patterns with no mirror, which BitBake rejects as an odd-length list
+# ("should contain paired members") and then ignores entirely.
+# Must also NOT be exactly http://petalinux.xilinx.com/sswreleases/rel-v2024/downloads:
+# that value selects a code path in xilinx_mirrors.py with a typo that raises NameError.
+# edf.amd.com is where petalinux.xilinx.com redirects to, so use it directly.
+CONFIG_PRE_MIRROR_URL="https://edf.amd.com/sswreleases/rel-v2024/downloads"
+
+# Root filesystem type
+CONFIG_SUBSYSTEM_ROOTFS_EXT4=y
+
+# Enable FPGA manager
+CONFIG_SUBSYSTEM_FPGA_MANAGER=y

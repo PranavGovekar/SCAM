@@ -1,0 +1,16 @@
+.git
+.cache
+out
+build
+hw/base/build
+petalinux/build
+petalinux/components
+petalinux/images
+config.mk
+*.jou
+*.log
+*.bit
+*.bit.bin
+*.xsa
+data
+public
