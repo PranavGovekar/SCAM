@@ -3,36 +3,58 @@
 An independent Vivado project cloned from the editable base Vivado project.
 It preserves the base PS/PL contract and adds:
 
-- 2x LVDS inputs from the FMC DIO card, plus a calibration input
-- 3x `diff_to_se_1ch`
+- 4x LVDS inputs from the FMC DIO card, plus a calibration input
+- 5x `diff_to_se_1ch`
 - `tdc_top`
 - Per-channel XPM asynchronous FIFOs inside `tdc_channel`: one for physics
   hits, one for calibration hits
 - LED routing (heartbeat, capture active, input monitor)
 
-The two inputs are FMC DIO 5ch channels 0 and 1 on ZCU102 HPC0 (card
-comparator outputs on LA33 and LA20). All five card outputs are kept disabled
+The four inputs are FMC DIO 5ch channels 0 to 3 on ZCU102 HPC0 (card
+comparator outputs on LA33, LA20, LA16 and LA03). All five card outputs are kept disabled
 (`oe` = 1) with 50 ohm input termination on (`term` = 1). HPC1 is not used.
 The input threshold is the card's DAC: set it before taking data
 (`sudo threshold <mV>`); it powers up at 0 V.
 
 | LED | Shows |
 | :-- | :-- |
-| GPIO_LED_3 (AJ14) | channel 0 input, on while above threshold |
-| GPIO_LED_4 (AJ15) | channel 1 input |
+| GPIO_LED_0..4 | running pattern while the TDC is enabled (control GPIO bit 0) |
+| GPIO_LED_5 (AH13) | channel 0 input, on while above threshold |
+| GPIO_LED_6 (AH14) | channel 1 input |
+| GPIO_LED_7 (AL12) | channel 2 input (channel 3 has no LED) |
 | card LED_TOP | heartbeat |
+
+## Delay-line placement
+
+Each channel has a start and a stop delay line, each in its own slice column.
+`tdc.xdc` gives every line two pblocks, so it can only be placed one way: the
+chain (100 CARRY8 and their capture flip-flops) in rows Y20..Y119, and the
+launch flip-flop, with the channel's input mux in the start column, in rows
+Y16..Y19 just below it. Both have `EXCLUDE_PLACEMENT`, so no other logic
+goes into those rows.
+
+| Channel | Start | Stop |
+| :-- | :-- | :-- |
+| 0 | X46 | X47 |
+| 1 | X48 | X49 |
+| 2 | X50 | X51 |
+| 3 | X52 | X53 |
+
+All eight are in clock region X1Y0/X1Y1. With one pblock of 120 rows per
+line the placer chose differently from build to build, and sometimes put a
+chain at Y0..Y99 with the launch flip-flop above it.
 
 ## Calibration input
 
-FMC DIO card channel 2 (LA16, pins Y12/AA12) is the calibration input: connect
+FMC DIO card channel 4 (LA00, pins Y4/Y3) is the calibration input: connect
 a free-running square wave there (e.g. a bench generator near 100 MHz). Its
 threshold is the same DAC setting as the other channels.
 
 When the program sets `axi_gpio_config` bit 0, `tdc_top`:
 
-1. disables both channels for 64 clk_fast cycles (delay lines held in reset;
+1. disables all channels for 64 clk_fast cycles (delay lines held in reset;
    the coarse counter keeps running),
-2. switches the input mux of both channels to the calibration input 16 cycles
+2. switches the input mux of every channel to the calibration input 16 cycles
    into that pause, so a glitch from the switch cannot become a hit,
 3. re-enables the channels and sets `axi_gpio_flags` bit 0.
 

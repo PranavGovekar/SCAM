@@ -26,10 +26,10 @@ Flags:
 
 ## Calibration
 
-The calibration input (FMC DIO card channel 2, see `../hw/README.md`) needs a
+The calibration input (FMC DIO card channel 4, see `../hw/README.md`) needs a
 free-running square wave. During a window the program reads the calibration
 records through the DMA like hits, counts the fine codes of each delay line
-(ch0 start, ch0 stop, ch1 start, ch1 stop), and afterwards sends one
+(ch0 start, ch0 stop, ch1 start, ... ch3 stop), and afterwards sends one
 code-density table per line, then carries on with physics. Physics hits still
 in the FIFOs are sent as usual during the window; new ones are not recorded.
 Records that arrive after the window has closed are discarded: which ones are
@@ -53,12 +53,12 @@ packet holds calibration words, bit 127 set, `[127:120]` giving the kind:
 
 | `[127:120]` | Word | Fields |
 | :-- | :-- | :-- |
-| `0xC1` | line header | `[119:112]` calibration id (counts up, wraps at 256), `[111:108]` line (0 ch0 start, 1 ch0 stop, 2 ch1 start, 3 ch1 stop), `[107:96]` flags, `[95:64]` hits, `[63:54]` first code, `[53:44]` last code, `[43:34]` empty codes, `[33:24]` wide codes, `[23:16]` table words that follow, `[15:0]` window in ms |
+| `0xC1` | line header | `[119:112]` calibration id (counts up, wraps at 256), `[111:108]` line (channel * 2, + 1 for the stop line: 0 ch0 start, 1 ch0 stop, ... 7 ch3 stop), `[107:96]` flags, `[95:64]` hits, `[63:54]` first code, `[53:44]` last code, `[43:34]` empty codes, `[33:24]` wide codes, `[23:16]` table words that follow, `[15:0]` window in ms |
 | `0xC2` | table | `[119:112]` calibration id, `[111:108]` line, `[107:98]` first code, `[95:0]` six u16, the bin-centre time of that code and the next five, in 1/16 ps |
 | `0xCF` | padding | fills the last calibration packet |
 
-Each line is a header word followed by its table words, the four lines one
-after the other, in 5 or 6 packets. The table is
+Each line is a header word followed by its table words, the eight lines one
+after the other, in 10 to 12 packets. The table is
 `t(k) = 2500 ps * (n_first + ... + n_(k-1) + n_k / 2) / N`, as `test_tdc.py`
 computes it. Flags: `0x001` fewer than 50 hits per code, `0x002` more than
 10 % of the codes empty, `0x004` a bin wider than 16 times the mean,

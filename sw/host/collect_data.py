@@ -61,7 +61,8 @@ WORD_CAL_TABLE = 0xC2
 CLOCK_PERIOD_PS = 2500.0
 TABLE_UNIT_PS = 1 / 16
 TABLE_PER_WORD = 6
-LINE_NAMES = ["ch0_start", "ch0_stop", "ch1_start", "ch1_stop"]
+LINE_NAMES = ["ch0_start", "ch0_stop", "ch1_start", "ch1_stop",
+              "ch2_start", "ch2_stop", "ch3_start", "ch3_stop"]
 CAL_FLAGS = {0x001: "few hits", 0x002: "empty codes", 0x004: "wide bins",
              0x008: "code range", 0x010: "calibration hits dropped"}
 

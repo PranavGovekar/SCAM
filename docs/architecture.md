@@ -48,14 +48,14 @@ Both outputs come from one MMCM inside `clk_wiz_0`.
 
 ### TDC
 
-    diff_in_0/1 -> diff_to_se -> input mux -> tdc_top (per-channel physics
-    cal_in      -> diff_to_se ->              and calibration FIFOs)
-                              -> axi_dma_0 (S2MM)
+    diff_in_0..3 -> diff_to_se -> input mux -> tdc_top (per-channel physics
+    cal_in       -> diff_to_se ->              and calibration FIFOs)
+                               -> axi_dma_0 (S2MM)
                                                        -> DDR
     CPU reads DMA buffer, packetises 90 hits, sends UDP.
 
 In calibration mode (`axi_gpio_config` bit 0) the mux feeds the calibration
-input to both channels and their records go to the calibration FIFOs instead.
+input to every channel and their records go to the calibration FIFOs instead.
 The program histograms them and sends code-density tables as calibration
 words; see `apps/tdc/sw/README.md`.
 

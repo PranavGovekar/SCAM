@@ -6,7 +6,7 @@ Modular FPGA + PetaLinux platform for physics DAQ on the **Xilinx ZCU102**
 (Zynq UltraScale+ XCZU9EG). Application bitstreams share one Linux image. Two
 applications are included:
 
-- **TDC** — 2-channel time-to-digital converter, DMA readout to DDR
+- **TDC** — 4-channel time-to-digital converter, DMA readout to DDR
 - **CT**  — 4-channel multifold coincidence trigger, timestamped FIFO
 
 The Linux image, rootfs, and device tree are identical for every application.
@@ -178,8 +178,9 @@ To swap back to TDC:
     sudo scam-load tdc
     sudo yeet-data-tdc 192.168.1.100
 
-User LEDs 3 to 6 on the ZCU102 show the inputs (TDC: channels 0 and 1; CT:
-A to D): an LED is on while its input is above the threshold.
+User LEDs on the ZCU102 show the inputs (TDC: channels 0 to 2 on LEDs 5 to
+7; CT: A to D on LEDs 3 to 6): an LED is on while its input is above the
+threshold. With the TDC, LEDs 0 to 4 run a pattern while it is enabled.
 
 `scam-load <name>` loads `/lib/firmware/<name>.bit.bin`. Do not use
 `fpgautil -b` on a file in `/lib/firmware`: it deletes the file after loading it.

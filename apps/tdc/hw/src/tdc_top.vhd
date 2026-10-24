@@ -4,7 +4,7 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity tdc_top is
     Generic (
-        G_NUM_CHANNELS : integer := 2;
+        G_NUM_CHANNELS : integer := 4;
         G_PACKET_SIZE  : integer := 90
     );
     Port (

@@ -13,7 +13,7 @@
  * Optionally configures an external I2C DAC threshold on startup (-v flag).
  *
  * Calibration (-c window, -C repeat): the firmware switches the calibration
- * input onto both channels; its records arrive through the DMA, tagged with
+ * input onto every channel; its records arrive through the DMA, tagged with
  * channel ID 0x800 + channel, and are histogrammed here, one histogram per
  * delay line. After the window the code-density tables are sent as
  * calibration words (see "Calibration words" below), then physics continues.
@@ -43,7 +43,7 @@
 #define WATCHDOG_TICKS     200000
 
 /* Calibration. A delay line is ch * 2 + 0 (start, rising edge) or + 1 (stop). */
-#define NUM_LINES          4
+#define NUM_LINES          8
 #define NUM_CODES          1024      /* fine codes are 10 bits */
 #define CLOCK_PERIOD_PS    2500.0
 #define LAST_TAP           784       /* code when the edge ran the whole line */

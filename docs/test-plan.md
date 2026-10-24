@@ -19,8 +19,8 @@ Run in order. Each step must pass before the next is attempted.
 
 ## 3. TDC captures hits
 
-- Connect a pulse generator on its own clock to FMC DIO channel 0 (and 1).
-  User LEDs 3 and 4 light while the inputs are above the threshold; set it
+- Connect a pulse generator on its own clock to FMC DIO channel 0 (and 1 to
+  3). User LEDs 5 to 7 light while inputs 0 to 2 are above the threshold; set it
   first with `sudo threshold <mV>`, about half the pulse height (it powers up
   at 0 V).
 - Use a 100 MHz square wave. Some other frequencies (97.3 MHz, for one) trap
