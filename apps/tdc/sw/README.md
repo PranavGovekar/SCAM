@@ -18,8 +18,14 @@ The binary is written to `build/apps/tdc/yeet-data-tdc`.
 
 Flags:
 
-- `-n N`  — stop after N hits (rounded up to a multiple of 90; `-1` = no limit)
+- `-n N`  — stop after N hits (at least N are sent; `-1` = no limit)
 - `-t S`  — stop after S seconds (`-1` = no limit)
+
+At the end of a run the program disables the TDC, has the firmware flush
+(config bit 1: every hit still in a FIFO is sent, the open packet is finished
+with padding) and sends its own last hits in a padded packet, so every hit
+recorded before the end is sent. A threshold set with `-v` has settled before
+the TDC is enabled.
 - `-v MV` — configure the I2C DAC threshold to MV millivolts first
 - `-c S`  — calibrate for S seconds at the start (default: no calibration)
 - `-C S`  — calibrate again every S seconds (needs `-c`)
@@ -48,14 +54,15 @@ The board prints one line per delay line, e.g.
 
 Every packet is 1440 bytes: 90 words of 128 bits, least significant byte
 first. A physics packet holds 90 hits, unchanged from the firmware
-(`parse_tdc` in `sw/host/collect_data.py`; bit 127 is always 0). A calibration
+(`parse_tdc` in `sw/host/collect_data.py`; bit 127 is always 0); the last
+packet of a run is filled up with padding words (`0xCF`). A calibration
 packet holds calibration words, bit 127 set, `[127:120]` giving the kind:
 
 | `[127:120]` | Word | Fields |
 | :-- | :-- | :-- |
 | `0xC1` | line header | `[119:112]` calibration id (counts up, wraps at 256), `[111:108]` line (channel * 2, + 1 for the stop line: 0 ch0 start, 1 ch0 stop, ... 7 ch3 stop), `[107:96]` flags, `[95:64]` hits, `[63:54]` first code, `[53:44]` last code, `[43:34]` empty codes, `[33:24]` wide codes, `[23:16]` table words that follow, `[15:0]` window in ms |
 | `0xC2` | table | `[119:112]` calibration id, `[111:108]` line, `[107:98]` first code, `[95:0]` six u16, the bin-centre time of that code and the next five, in 1/16 ps |
-| `0xCF` | padding | fills the last calibration packet |
+| `0xCF` | padding | fills the last calibration packet, and the last packet of a run |
 
 Each line is a header word followed by its table words, the eight lines one
 after the other, in 10 to 12 packets. The table is
@@ -72,8 +79,8 @@ computes it. Flags: `0x001` fewer than 50 hits per code, `0x002` more than
 | `0xA0000000` | AXI DMA (S2MM) |
 | `0xA0010000` | Control GPIO: bit0=enable, bit1=reset |
 | `0xA0020000` | Status GPIO: FIFO overflow counter |
-| `0xA0030000` | Config GPIO: bit 0 = calibration request |
+| `0xA0030000` | Config GPIO: bit 0 = calibration request, bit 1 = flush |
 | `0xA0040000` | Status2 GPIO: calibration hits dropped |
-| `0xA0050000` | Flags GPIO: bit 0 = calibration mode in effect |
+| `0xA0050000` | Flags GPIO: bit 0 = calibration mode in effect, bit 1 = flushed |
 
 See `../../../docs/pl-contract.md` for the full table.

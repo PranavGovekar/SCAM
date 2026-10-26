@@ -43,8 +43,8 @@ from pathlib import Path
 import numpy as np
 
 import collect_data
-
-CLOCK_PERIOD_PS = 2500.0   # 400 MHz TDC clock
+from tdc_analysis import (CLOCK_PERIOD_PS, apply_table, code_density,  # noqa: F401
+                          peak_stats, raw_table, tot_ps)
 DEFAULT_HITS = 1_000_000
 MIN_HITS_PER_CODE = 50     # below this the code-density table is noisy
 MAX_EMPTY_FRACTION = 0.10  # more empty codes than this: phases not random
@@ -64,73 +64,6 @@ def load_capture(path):
     if data.shape[0] == 0 or data.shape[1] != 5:
         sys.exit(f"ERROR: {path} holds no TDC hits")
     return data
-
-
-def raw_table(codes):
-    """Equal-width bins: the highest code seen spans one clock period."""
-    top = max(int(codes.max()), 1)
-    return np.arange(top + 1) * CLOCK_PERIOD_PS / top
-
-
-def code_density(codes):
-    """Code-density calibration of one delay line. Returns (table, info)."""
-    counts = np.bincount(codes, minlength=int(codes.max()) + 1).astype(float)
-    total = counts.sum()
-    table = CLOCK_PERIOD_PS * (np.cumsum(counts) - counts / 2) / total
-
-    used = np.nonzero(counts)[0]
-    lo, hi = int(used[0]), int(used[-1])
-    span = counts[lo:hi + 1]
-    lsb = CLOCK_PERIOD_PS / len(span)
-    widths = CLOCK_PERIOD_PS * span / total
-    dnl = widths / lsb - 1
-    info = {
-        "hits": int(total), "codes": [lo, hi], "lsb_ps": lsb,
-        "counts": span, "widths": widths, "dnl": dnl, "inl": np.cumsum(dnl),
-        "empty": int(np.count_nonzero(span == 0)),
-    }
-    return table, info
-
-
-def apply_table(table, codes):
-    """Time in ps of each code; codes past the end of the table count as one period."""
-    return np.where(codes < len(table),
-                    table[np.minimum(codes, len(table) - 1)], CLOCK_PERIOD_PS)
-
-
-def tot_ps(hits, t_start, t_stop):
-    _, r_coarse, r_fine, f_coarse, f_fine = hits.T
-    return ((f_coarse - r_coarse) * CLOCK_PERIOD_PS
-            - apply_table(t_stop, f_fine) + apply_table(t_start, r_fine))
-
-
-def peak_stats(tot, bin_ps):
-    """Mean, RMS, Gaussian sigma (fit to the log of the peak) and FWHM, in ps."""
-    mean, rms = float(tot.mean()), float(tot.std())
-    lo, hi = np.percentile(tot, [0.5, 99.5])
-    edges = np.arange(lo, hi + bin_ps, bin_ps)
-    counts, edges = np.histogram(tot, bins=edges)
-    centres = (edges[:-1] + edges[1:]) / 2
-    sigma, mu = rms, mean
-    peak = counts.max() if len(counts) else 0
-    sel = counts > 0.05 * peak
-    if sel.sum() >= 3:
-        # log(counts) of a Gaussian is a parabola: a x^2 + b x + c
-        x = centres[sel] - mean
-        a, b, _ = np.polyfit(x, np.log(counts[sel]), 2, w=np.sqrt(counts[sel]))
-        if a < 0:
-            sigma = float(np.sqrt(-1 / (2 * a)))
-            mu = float(mean - b / (2 * a))
-    fwhm = float("nan")
-    above = np.nonzero(counts >= peak / 2)[0]
-    if len(above) and 0 < above[0] and above[-1] < len(counts) - 1:
-        # Interpolate where the histogram crosses half the peak on each side.
-        half = peak / 2
-        i, j = above[0], above[-1]
-        left = np.interp(half, [counts[i - 1], counts[i]], [centres[i - 1], centres[i]])
-        right = np.interp(half, [counts[j + 1], counts[j]], [centres[j + 1], centres[j]])
-        fwhm = float(right - left)
-    return {"hits": len(tot), "mean": mean, "rms": rms, "sigma": sigma, "mu": mu, "fwhm": fwhm}
 
 
 # ---------------------------------------------------------------- plots

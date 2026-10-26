@@ -10,13 +10,22 @@ Usage:
     python collect_data.py --app ct -v 1000 -t 60 data-yeeter.local
     python collect_data.py --no-ssh -t 30 data-yeeter.local   # board program started by hand
     python collect_data.py -v 250 -n 1000000 --cal-window 1 data-yeeter.local  # calibrate first
+    python collect_data.py -v 0:120,1:150 -t 60 data-yeeter.local   # a threshold per channel
+    python collect_data.py -v 39 -t 600 -o data/pedestal_39mV data-yeeter.local   # name the run
 
 The input threshold (-v, millivolts) is required: the FMC DIO card powers up
-with its threshold at 0 V and then sees no pulses.
+with its threshold at 0 V and then sees no pulses. -v 250 sets every channel;
+-v 0:120,1:150 sets only the card channels named (0 to 3 = TDC channels 0 to
+3, 4 = the calibration input) and leaves the others as they are.
+
+Only packets from the board are recorded, and only words with a TDC channel
+ID count as hits; anything else is reported in run.txt. A run does not start
+while another board program is running.
 
 A run folder (data/<date>_<time>_<app>/ by default) holds:
     hits.csv   one row per TDC hit or CT event
-    run.txt    settings, the board program's output and packet counts
+    run.txt    settings, the board program's output and packet counts, and
+               run_seconds: how long the board took data (for rates)
     calibrations/cal_<n>.json   TDC only, one per calibration the board sent
 """
 
@@ -39,9 +48,14 @@ APPS = {"tdc": "yeet-data-tdc", "ct": "yeet-data-ct"}
 UDP_PORT = 8080
 # Time allowed for packets still in flight after the board program exits.
 DRAIN_S = 1.0
-# A burst of TDC packets easily exceeds the default socket buffer.
-RECV_BUFFER_BYTES = 8 * 1024 * 1024
+# A burst of TDC packets easily exceeds the default socket buffer. The kernel
+# gives at most net.core.rmem_max (raise it to 64 MB on a Raspberry Pi with
+# sysctl, or packets are lost at high rates).
+RECV_BUFFER_BYTES = 64 * 1024 * 1024
 POLL_TIMEOUT_S = 2.0
+# Threshold DAC channel of each FMC DIO card channel (schematic EDA-02408):
+# card channel 3 is DAC channel 7; DAC channels 3 and 6 are not connected.
+CARD_TO_DAC = {0: 0, 1: 1, 2: 2, 3: 7, 4: 4}
 PACKET_BYTES = {"tdc": 1440, "ct": 8}
 EVENTS_PER_PACKET = {"tdc": 90, "ct": 1}
 # Packets decoded per step when the raw capture is converted to CSV.
@@ -55,9 +69,12 @@ CT_COLUMNS = ["Timestamp", "Coinc_Out", "ABCD", "BCD", "ACD", "ABD", "ABC",
 
 _MASK48 = np.uint64((1 << 48) - 1)
 
+# Channel IDs (bits 127:116) of TDC hits; any other word is not a hit.
+TDC_CHANNELS = 4
 # TDC calibration words (yeet-data-tdc.c), bits 127:120 of a word with bit 127 set.
 WORD_CAL_HEADER = 0xC1
 WORD_CAL_TABLE = 0xC2
+WORD_PADDING = 0xCF
 CLOCK_PERIOD_PS = 2500.0
 TABLE_UNIT_PS = 1 / 16
 TABLE_PER_WORD = 6
@@ -68,15 +85,20 @@ CAL_FLAGS = {0x001: "few hits", 0x002: "empty codes", 0x004: "wide bins",
 
 
 def tdc_words(buf):
-    """The 128-bit words of TDC packets as (low, high) 64-bit halves, and a
-    mask of the physics hits (bit 127 clear)."""
+    """The 128-bit words of TDC packets as (low, high) 64-bit halves, a mask
+    of the physics hits (channel ID 0 .. TDC_CHANNELS-1) and a mask of the
+    words that are neither hits nor calibration or padding words."""
     w = np.frombuffer(buf, dtype="<u8").reshape(-1, 2)
-    return w, (w[:, 1] >> np.uint64(63)) == 0
+    physics = (w[:, 1] >> np.uint64(52)) < TDC_CHANNELS
+    kind = w[:, 1] >> np.uint64(56)
+    board = (kind == WORD_CAL_HEADER) | (kind == WORD_CAL_TABLE) | (kind == WORD_PADDING)
+    return w, physics, ~physics & ~board
 
 
 def parse_tdc(buf):
     """Decode TDC packets into rows of (channel, rising coarse, rising fine,
-    falling coarse, falling fine). Calibration and padding words are skipped.
+    falling coarse, falling fine). Every word that is not a hit (calibration,
+    padding, or an unknown channel ID) is skipped.
 
     Each hit is the 128-bit word that tdc_channel.vhd writes to its FIFO,
     sent least significant byte first:
@@ -87,7 +109,7 @@ def parse_tdc(buf):
         [115:68]  falling coarse
         [127:116] channel id (bit 127 set: not a hit, see decode_calibrations)
     """
-    w, physics = tdc_words(buf)
+    w, physics, _ = tdc_words(buf)
     w = w[physics]
     lo, hi = w[:, 0], w[:, 1]
     rows = np.empty((len(w), 5), dtype=np.int64)
@@ -188,10 +210,11 @@ def new_run_dir(tag):
 
 
 def local_ip_for(host):
+    """This computer's address towards the board, and the board's address."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect((host, 22))
-        return s.getsockname()[0]
+        return s.getsockname()[0], s.getpeername()[0]
     except OSError as e:
         sys.exit(f"ERROR: no network route to {host} ({e}). "
                  "Check the cable and the board address.")
@@ -199,9 +222,10 @@ def local_ip_for(host):
         s.close()
 
 
-def listen(local_ip, raw_path, app, stop_event, max_events, stats):
-    """Write every packet of the expected size to raw_path, unchanged.
-    Decoding waits until the run is over so that no time is lost here."""
+def listen(local_ip, board_ip, raw_path, app, stop_event, max_events, stats):
+    """Write every packet of the expected size from board_ip to raw_path,
+    unchanged. Decoding waits until the run is over so that no time is lost
+    here."""
     size = PACKET_BYTES[app]
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -217,8 +241,11 @@ def listen(local_ip, raw_path, app, stop_event, max_events, stats):
     with open(raw_path, "wb") as f:
         while not stop_event.is_set():
             try:
-                data = sock.recv(2048)
+                data, (sender, _) = sock.recvfrom(2048)
             except socket.timeout:
+                continue
+            if sender != board_ip:
+                stats["foreign"] += 1
                 continue
             if len(data) != size:
                 stats["ignored"] += 1
@@ -239,11 +266,13 @@ def listen(local_ip, raw_path, app, stop_event, max_events, stats):
 
 def raw_to_csv(raw_path, csv_path, app, max_events):
     """Decode the raw capture in chunks and write the CSV. Returns the row
-    count and the TDC calibration words as (low, high, rows before it)."""
+    count, the TDC calibration words as (low, high, rows before it), and the
+    number of TDC words that were neither (left out of the CSV)."""
     size = PACKET_BYTES[app]
     parse = parse_tdc if app == "tdc" else parse_ct
     rows_written = 0
     cal_words = []
+    unknown_words = 0
     with open(raw_path, "rb") as src, open(csv_path, "w") as dst:
         dst.write(",".join(TDC_COLUMNS if app == "tdc" else CT_COLUMNS) + "\n")
         while True:
@@ -251,8 +280,9 @@ def raw_to_csv(raw_path, csv_path, app, max_events):
             if not buf:
                 break
             if app == "tdc":
-                w, physics = tdc_words(buf)
-                idx = np.nonzero(~physics)[0]
+                w, physics, unknown = tdc_words(buf)
+                unknown_words += int(np.count_nonzero(unknown))
+                idx = np.nonzero(~physics & ~unknown)[0]
                 before = rows_written + np.cumsum(physics)[idx]
                 cal_words += [(int(w[i, 0]), int(w[i, 1]), int(b)) for i, b in zip(idx, before)]
             rows = parse(buf)
@@ -262,14 +292,15 @@ def raw_to_csv(raw_path, csv_path, app, max_events):
             rows_written += len(rows)
             if max_events and rows_written >= max_events:
                 break
-    return rows_written, cal_words
+    return rows_written, cal_words, unknown_words
 
 
 def save_calibrations(out_dir, cal_words):
-    """Write calibrations/cal_<n>.json and return summary lines for run.txt."""
+    """Write calibrations/cal_<n>.json. Returns summary lines for run.txt and
+    the number of calibrations."""
     cals = decode_calibrations(cal_words)
     if not cals:
-        return []
+        return [], 0
     folder = out_dir / "calibrations"
     folder.mkdir(exist_ok=True)
     lines = []
@@ -286,22 +317,29 @@ def save_calibrations(out_dir, cal_words):
                          f"{line['empty']} empty, {line['wide']} wide -- {flags}")
         for name in cal["incomplete"]:
             lines.append(f"  {name}: incomplete (no hits, or a calibration packet was lost)")
-    return lines
+    return lines, len(cals)
 
 
 def trigger_remote(host, user, password, cmd):
-    """Run cmd on the board, show its output, and return the output lines."""
+    """Run cmd on the board and show its output. Returns the output lines and
+    the seconds from the board's "=== ... STREAM ===" line to its "=== DONE ==="
+    line, which is how long it took data (None if either line is missing)."""
     lines = []
+    marks = {}
     try:
         import paramiko
     except ImportError:
         print("ERROR: paramiko not installed. pip install -r requirements.txt")
-        return lines
+        return lines, None
 
     def show(line):
         line = line.rstrip()
         if line.strip() == password:      # the terminal echoes the sudo password
             return
+        if line.endswith("STREAM ==="):
+            marks["start"] = time.time()
+        elif line == "=== DONE ===":
+            marks["end"] = time.time()
         lines.append(line)
         print(f"[board] {line}")
 
@@ -327,7 +365,73 @@ def trigger_remote(host, user, password, cmd):
         c.close()
     except Exception as e:
         print(f"[ssh error] {e}")
-    return lines
+    if "start" in marks and "end" in marks:
+        return lines, marks["end"] - marks["start"]
+    return lines, None
+
+
+def board_shell(host, user, password, cmd, timeout=30):
+    """Run a short command on the board and return its output."""
+    import paramiko
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect(host, username=user, password=password, timeout=15)
+    try:
+        _, stdout, _ = c.exec_command(cmd, timeout=timeout)
+        return stdout.read().decode()
+    finally:
+        c.close()
+
+
+# Prints the name of each board program that is running (no pgrep needed).
+BOARD_PROGRAMS_RUNNING = ("cat /proc/[0-9]*/comm 2>/dev/null | grep -x "
+                          + " ".join(f"-e {p}" for p in APPS.values()))
+
+# PL die temperature of the ZCU102 (AMS), in millidegrees C.
+PL_TEMP_READ = ("for d in /sys/bus/iio/devices/iio:device*; do "
+                "[ \"$(cat $d/name)\" = xilinx-ams ] && cat $d/in_temp20_input; done")
+
+
+def read_die_temp(host, user=SSH_USER, password=SSH_PASS):
+    """PL die temperature in C, or None if it could not be read."""
+    try:
+        return float(board_shell(host, user, password, PL_TEMP_READ).split()[0]) / 1000
+    except Exception:
+        return None
+
+
+def parse_thresholds(text):
+    """'250' -> 250 (every channel); '0:120,1:150' -> {0: 120, 1: 150}, keyed
+    by card channel. Raises ValueError on anything else."""
+    if ":" not in text:
+        mv = int(text)
+        if not 0 <= mv <= 3300:
+            raise ValueError("thresholds are 0 to 3300 mV")
+        return mv
+    out = {}
+    for item in text.split(","):
+        ch, mv = (int(x) for x in item.split(":"))
+        if ch not in CARD_TO_DAC or not 0 <= mv <= 3300:
+            raise ValueError("card channels are 0 to 4, thresholds 0 to 3300 mV")
+        out[ch] = mv
+    return out
+
+
+def format_thresholds(t):
+    if t is None:
+        return "not set"
+    if isinstance(t, dict):
+        return ",".join(f"{ch}:{mv}" for ch, mv in sorted(t.items()))
+    return str(t)
+
+
+def set_channel_thresholds(host, user, password, thresholds):
+    """Set the card channels in {channel: mV} with the board's threshold program."""
+    cmd = " && ".join(f"echo '{password}' | sudo -S -p '' threshold -c {CARD_TO_DAC[ch]} {mv}"
+                      for ch, mv in sorted(thresholds.items()))
+    for line in board_shell(host, user, password, cmd + " 2>&1").splitlines():
+        if line.strip():
+            print(f"[board] {line.strip()}")
 
 
 def board_packets_sent(lines):
@@ -345,25 +449,40 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
             out_dir=None, user=SSH_USER, password=SSH_PASS, no_ssh=False,
             cal_window=None, cal_every=None):
     """Run one capture. Returns (run folder, CSV path, rows saved).
+    threshold_mv: mV for every channel, or {channel: mV} for some channels.
     cal_window/cal_every (seconds, TDC): calibrate first, and repeat."""
+    if not no_ssh:
+        # Another capture would share the TDC, the DMA and the thresholds.
+        running = board_shell(host, user, password, BOARD_PROGRAMS_RUNNING).split()
+        if running:
+            sys.exit(f"ERROR: {', '.join(sorted(set(running)))} is already running on the "
+                     "board (another capture?). Not starting; wait for it to end.")
     out_dir = Path(out_dir) if out_dir else new_run_dir(app)
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "hits.csv"
     raw_path = out_dir / "hits.raw"
 
-    local_ip = local_ip_for(host)
+    local_ip, board_ip = local_ip_for(host)
     print(f"Local IP : {local_ip}")
     print(f"Run      : {out_dir}")
 
+    temp_start = None if no_ssh else read_die_temp(host, user, password)
+    if isinstance(threshold_mv, dict):
+        if no_ssh:
+            sys.exit("ERROR: per-channel thresholds need the SSH login (not --no-ssh)")
+        set_channel_thresholds(host, user, password, threshold_mv)
+
     stop_event = threading.Event()
-    stats = {"packets": 0, "cal_packets": 0, "ignored": 0}
+    stats = {"packets": 0, "cal_packets": 0, "ignored": 0, "foreign": 0}
     listener = threading.Thread(
-        target=listen, args=(local_ip, raw_path, app, stop_event, max_events, stats), daemon=True)
+        target=listen, args=(local_ip, board_ip, raw_path, app, stop_event, max_events, stats),
+        daemon=True)
     listener.start()
     started = datetime.now()
 
     board_lines = []
     cmd = None
+    stream_s = None
     if no_ssh:
         # Just listen until max-seconds, max-events or Ctrl+C
         try:
@@ -384,7 +503,7 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
         if max_seconds:
             # The board program takes whole seconds, at least 1.
             cmd += f" -t {max(1, math.ceil(max_seconds))}"
-        if threshold_mv is not None:
+        if threshold_mv is not None and not isinstance(threshold_mv, dict):
             cmd += f" -v {threshold_mv}"
         if cal_window:
             cmd += f" -c {cal_window:g}"
@@ -392,7 +511,7 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
             cmd += f" -C {cal_every:g}"
         cmd += f" {local_ip}"
         try:
-            board_lines = trigger_remote(host, user, password, cmd)
+            board_lines, stream_s = trigger_remote(host, user, password, cmd)
             # The board program has exited: let the last packets arrive.
             listener.join(timeout=DRAIN_S)
         except KeyboardInterrupt:
@@ -402,10 +521,13 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
     # The listener wakes at least every POLL_TIMEOUT_S to see stop_event.
     listener.join(timeout=POLL_TIMEOUT_S + 3.0)
 
+    temp_end = None if no_ssh else read_die_temp(host, user, password)
     print("[data] decoding")
-    rows, cal_words = raw_to_csv(raw_path, csv_path, app, max_events)
+    rows, cal_words, unknown_words = raw_to_csv(raw_path, csv_path, app, max_events)
     raw_path.unlink()
-    cal_lines = save_calibrations(out_dir, cal_words)
+    cal_lines, n_cals = save_calibrations(out_dir, cal_words)
+    # Time the board recorded hits: the stream minus its calibration windows.
+    run_s = stream_s - n_cals * (cal_window or 0) if stream_s else None
 
     sent = board_packets_sent(board_lines)
     received = stats["packets"]
@@ -417,9 +539,12 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
         f.write(f"command: {' '.join(sys.argv)}\n")
         f.write(f"host: {host}\n")
         f.write(f"app: {app}\n")
-        f.write(f"threshold_mv: {threshold_mv if threshold_mv is not None else 'not set'}\n")
+        f.write(f"threshold_mv: {format_thresholds(threshold_mv)}\n")
+        for name, t in (("die_temp_start_c", temp_start), ("die_temp_end_c", temp_end)):
+            f.write(f"{name}: {'not read' if t is None else f'{t:.2f}'}\n")
         f.write(f"max_events: {max_events or 'none'}\n")
         f.write(f"max_seconds: {max_seconds or 'none'}\n")
+        f.write(f"run_seconds: {'not measured' if run_s is None else f'{run_s:.2f}'}\n")
         if cmd:
             f.write(f"board_command: {cmd}\n")
         if cal_window:
@@ -429,6 +554,10 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
         if stats["cal_packets"]:
             f.write(f"calibration_packets_received: {stats['cal_packets']}\n")
         f.write(f"rows_saved: {rows}\n")
+        if unknown_words:
+            f.write(f"unknown_words_dropped: {unknown_words}\n")
+        if stats["foreign"]:
+            f.write(f"packets_from_other_senders_ignored: {stats['foreign']}\n")
         if cal_lines:
             f.write("\n" + "\n".join(cal_lines) + "\n")
         if board_lines:
@@ -443,6 +572,11 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
     if stats["ignored"]:
         print(f"[note] {stats['ignored']} packets of an unexpected size were ignored "
               f"(is the other application running?)")
+    if stats["foreign"]:
+        print(f"[note] {stats['foreign']} packets from another sender than {board_ip} were ignored")
+    if unknown_words:
+        print(f"[WARNING] {unknown_words} words were neither hits nor calibration words; "
+              f"left out of hits.csv")
     return out_dir, csv_path, rows
 
 
@@ -451,9 +585,9 @@ def main():
     ap.add_argument("host", help="board address (also used for SSH), e.g. data-yeeter.local")
     ap.add_argument("--app", choices=sorted(APPS), default="tdc",
                     help="which program to start on the board (default: tdc)")
-    ap.add_argument("-v", "--threshold", type=int, metavar="MV",
-                    help="input threshold in mV, set on the board before the run "
-                         "(required; the card powers up at 0 V)")
+    ap.add_argument("-v", "--threshold", metavar="MV",
+                    help="input threshold in mV for every channel, or per channel as "
+                         "CH:MV,CH:MV (required; the card powers up at 0 V)")
     ap.add_argument("-n", "--max-events", type=int, default=None)
     ap.add_argument("-t", "--max-seconds", type=float, default=None)
     ap.add_argument("-o", "--outdir", help="run folder (default: data/<date>_<time>_<app>)")
@@ -478,8 +612,11 @@ def main():
     if args.threshold is None and not args.no_ssh:
         ap.error("choose an input threshold with -v <mV> (about half the pulse height); "
                  "the card powers up at 0 V and then sees nothing")
-    if args.threshold is not None and not 0 <= args.threshold <= 3300:
-        ap.error("-v must be 0 to 3300 mV")
+    if args.threshold is not None:
+        try:
+            args.threshold = parse_thresholds(args.threshold)
+        except ValueError as e:
+            ap.error(f"-v {args.threshold}: {e}")
 
     capture(args.host, args.app, args.threshold, args.max_events, args.max_seconds,
             args.outdir, args.user, args.password, args.no_ssh,

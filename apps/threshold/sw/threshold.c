@@ -5,7 +5,10 @@
  * bitstream; the value stays until it is set again or the board loses power.
  *
  *   threshold 1000        all 8 channels to 1000 mV
- *   threshold -c 2 850    channel 2 only
+ *   threshold -c 2 850    DAC channel 2 only (card channel 2)
+ *
+ * DAC channels are not card channels: card channel 3 is DAC channel 7 (see
+ * i2c_dac.h).
  */
 
 #include <stdio.h>
@@ -19,6 +22,7 @@ static void usage(const char *progname)
     printf("Usage: %s [-c channel] <millivolts>\n", progname);
     printf("  -c CH   set only DAC channel CH (0..%d); default is all channels\n",
            I2C_DAC_CHANNELS - 1);
+    printf("          card channel 0, 1, 2, 3, 4 = DAC channel 0, 1, 2, 7, 4\n");
     printf("  millivolts: 0..3300\n");
 }
 

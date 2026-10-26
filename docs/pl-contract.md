@@ -38,10 +38,15 @@ Any bitstream running in the SCAM Linux image must satisfy this contract.
 - `axi_gpio_ctrl`: used
 - `axi_gpio_status[31:0]`: TDC overflow counter (physics FIFOs)
 - `axi_gpio_config` ch1 bit 0: calibration request (1 = switch the calibration
-  input onto every channel); the other bits and ch2 are unused
+  input onto every channel)
+- `axi_gpio_config` ch1 bit 1: flush (end of a run, TDC disabled: once every
+  FIFO is empty, finish the open packet with padding words `0xCF` in
+  `[127:120]`); the other bits and ch2 are unused
 - `axi_gpio_status2[31:0]`: hits dropped because a calibration FIFO was full
 - `axi_gpio_flags[0]`: calibration mode in effect (the switch requested by
-  config bit 0 is complete); the other bits are 0
+  config bit 0 is complete)
+- `axi_gpio_flags[1]`: flushed (flush requested, every FIFO empty, no packet
+  open); the other bits are 0
 
 ### CT
 

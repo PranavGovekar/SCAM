@@ -80,7 +80,7 @@ Nothing has to be built for this.
     apps/ct         Coincidence trigger application: hw/, sw/
     apps/_template  Starting point for `make new-app`
     sw/common       Shared C helpers (reg_io, udp, i2c_dac, args) and app.mk
-    sw/host         Python collector and TDC test (run on the host PC)
+    sw/host         Python collector, ToT analysis and TDC tests (run on the host PC)
     data/           Captures, one folder per run (not in git)
     petalinux       PetaLinux project skeleton
     scripts         Build, package and flash helpers
@@ -98,7 +98,7 @@ Build host (Linux):
 - Xilinx PetaLinux 2024.1 -- only to build the Linux image yourself; it can
   run in the provided Ubuntu 22.04 container (`PETALINUX_ENV=container`)
 - GNU Make, `bash`, `git`
-- Python 3.9+ on the host PC (for the UDP collector)
+- Python 3.9+ on the host PC (collector and analysis: paramiko, numpy, matplotlib)
 
 Machine-specific settings (tool paths, `PETALINUX_ENV`) go in `config.mk`;
 see `config.mk.example`.
@@ -196,6 +196,21 @@ To collect data on the host PC:
 The scripts set the threshold and start the program on the board over SSH, so
 the `sudo threshold` and `sudo yeet-data-*` commands above are only needed
 when you run them by hand. Results go to `data/`; see `sw/host/README.md`.
+
+### ToT with a pedestal
+
+A pedestal is an ordinary run without the source, at the same threshold. Take
+it, take the run with the source, then turn both into ToT and plot:
+
+    python sw/host/collect_data.py -v 39 -t 600 -o data/pedestal_39mV <board-ip>
+    python sw/host/collect_data.py -v 39 -t 600 -o data/source_39mV <board-ip>
+    python sw/host/make_tot.py data/pedestal_39mV data/source_39mV      # hits.csv -> tot.csv
+    python sw/host/plot_tot.py data/source_39mV                         # linear and log
+    python sw/host/plot_tot_pedestal.py data/source_39mV data/pedestal_39mV
+
+The subtraction divides each histogram by its own run time, so the two runs
+may have different lengths. The plot settings (channel, bin width, range) are
+variables at the top of each plot script. Details in `sw/host/README.md`.
 
 ---
 

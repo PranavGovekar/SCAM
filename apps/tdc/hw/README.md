@@ -44,6 +44,16 @@ All eight are in clock region X1Y0/X1Y1. With one pblock of 120 rows per
 line the placer chose differently from build to build, and sometimes put a
 chain at Y0..Y99 with the launch flip-flop above it.
 
+## End of a run (flush)
+
+The arbiter in `tdc_top` sends packets of 90 words; the DMA only delivers a
+packet once it is complete. At the end of a run the program disables the TDC
+and sets `axi_gpio_config` bit 1. The arbiter then sends every word still in
+a FIFO, and once all FIFOs are empty finishes the open packet with padding
+words (`0xCF` in `[127:120]`, never taken for a hit). `axi_gpio_flags` bit 1
+reports when every FIFO is empty and no packet is open. With bit 1 clear the
+arbiter works as before.
+
 ## Calibration input
 
 FMC DIO card channel 4 (LA00, pins Y4/Y3) is the calibration input: connect

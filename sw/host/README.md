@@ -6,8 +6,14 @@ Run on the PC. Each run is saved in its own folder under `data/` (see
 | Script | Does |
 | :-- | :-- |
 | `collect_data.py` | starts `yeet-data-tdc` or `yeet-data-ct` on the board, saves what it sends |
+| `threshold_scan.py` | TDC: rate and ToT of detector pulses against threshold, per channel |
+| `make_master_cal.py` | TDC: one long board calibration, kept in `calibrations/` as a master |
+| `make_tot.py` | TDC: a run's `hits.csv` to `tot.csv` (time and ToT in ns, calibrated) |
+| `plot_tot.py` | TDC: ToT histogram of one `tot.csv`, linear and log |
+| `plot_tot_pedestal.py` | TDC: ToT of a source run minus a pedestal run |
 | `test_tdc.py` | TDC test: collects 1 million hits, plots ToT, calibrates the delay lines, plots again |
 | `test_tdc_cal_hits.py` | TDC test: how many hits the code-density calibration needs |
+| `tdc_analysis.py` | library: ToT, code density, calibration files, master lookup (used by the scripts above) |
 
 ## Install
 
@@ -31,11 +37,28 @@ Every run needs `-v <mV>`, the input threshold of the FMC DIO card, about half
 the pulse height. The card powers up at 0 V and then sees no pulses; the
 setting stays until the board loses power.
 
+`-v 250` sets every channel. `-v 0:120,1:150` sets only the card channels
+named (card channel k is TDC channel k) and leaves the others as they are.
+The calibration input is card channel 4 with the 4-channel TDC bitstream and
+card channel 2 with the 2-channel one. The card's DAC channels are wired out
+of order (card channel 3 is DAC channel 7); `collect_data.py` takes card
+channels, the board's `threshold -c` takes DAC channels.
+
+A threshold needs about 6 ms to settle at the comparator (10 kohm, 100 nF on
+the card); the board programs wait 20 ms after setting it, so no hit of a run
+is taken at the previous threshold. Every run also starts with the TDC and
+DMA reset, which discards anything left from an earlier run. Only words with
+a TDC channel ID (0 to 3) go into `hits.csv`; calibration records never
+leave the board, and any other word is counted in `run.txt`
+(`unknown_words_dropped`). Packets from any other sender than the board are
+ignored, and a run refuses to start while a board program is still running.
+
 ## collect_data.py
 
     python sw/host/collect_data.py -v 250 -n 18000 data-yeeter.local          # TDC
     python sw/host/collect_data.py --app ct -v 1000 -n 1000 data-yeeter.local # CT
     python sw/host/collect_data.py -v 250 -t 60 data-yeeter.local             # 60 seconds
+    python sw/host/collect_data.py -v 0:120,1:150 -t 60 data-yeeter.local     # per channel
 
 The collector logs in over SSH, sets the threshold and starts the program
 through `sudo`. Load the matching bitstream on the board first
@@ -43,7 +66,8 @@ through `sudo`. Load the matching bitstream on the board first
 arrive and decoded at the end, so a fast stream is not slowed down.
 
     --app tdc|ct  program to start on the board (default: tdc)
-    -v MV         input threshold (required, except with --no-ssh)
+    -v MV         input threshold for every channel, or CH:MV,CH:MV per channel
+                  (required, except with --no-ssh)
     -n N          stop after N hits or events
     -t S          stop after S seconds
     -o DIR        run folder (default: data/<date>_<time>_<app>)
@@ -51,11 +75,14 @@ arrive and decoded at the end, so a fast stream is not slowed down.
     --password P  SSH and sudo password (default: petalinux)
     --no-ssh      do not start the board program, just listen
     --cal-window S  TDC: calibrate for S seconds first (calibration input,
-                    FMC DIO card channel 2)
+                    FMC DIO card channel 4)
     --cal-every S   TDC: calibrate again every S seconds
 
-Output in the run folder: `hits.csv` and `run.txt` (settings, the board's
-summary, packets received and, for the TDC, how many were lost).
+Output in the run folder: `hits.csv` and `run.txt` (settings, the PL die
+temperature at the start and end, the board's summary, packets received and,
+for the TDC, how many were lost). `run_seconds` in `run.txt` is how long the
+board took data, measured from its start and end messages, without
+calibration windows; rates are worked out from it.
 
 TDC CSV:
 
@@ -81,6 +108,94 @@ saved.
 CT CSV (one 8-byte packet per event, decoded by `parse_ct`):
 
     Timestamp, Coinc_Out, ABCD, BCD, ACD, ABD, ABC, CD, BD, BC, AD, AC, AB, D, C, B, A
+
+## threshold_scan.py
+
+    python sw/host/threshold_scan.py --channels 0 --from 20 --to 400 --step 20 -t 10 data-yeeter.local
+    python sw/host/threshold_scan.py --channels 0,1 --thresholds 30,50,80,120 -t 30 data-yeeter.local
+    python sw/host/threshold_scan.py --analyse data/<scan folder>        # again, without the board
+
+For detector pulses (random heights and times). At each threshold the scanned
+channels are set to it (the other channels and the calibration input keep
+theirs), one capture of `-t` seconds is taken (or `-n` hits), and every
+scanned channel is analysed. It only reports; it does not set the thresholds
+for later runs.
+
+Reported per channel and threshold: hits, rate, FIFO overflows, packets lost,
+and the ToT with each calibration (raw; the master nearest the die
+temperature, or `--master FILE`): mean, median, RMS, fitted sigma, FWHM,
+percentiles 5/25/75/95 % and the fraction of short pulses (`--short-ns`,
+default 2 ns). `summary.txt` marks where the rate is flat against threshold
+(neighbouring points within 20 %) and suggests the middle of that plateau:
+a suggestion from the rate alone, check the plots. It also notes where the
+ToT median jumps by more than a factor 2 from one threshold to the next: there
+the threshold crosses a different part of the pulse (for example only an
+overshoot), even if the rate does not change. Above about 1.5 M hits/s
+for all channels together the readout drops hits (counted as overflows) and
+the rate shown is capped.
+
+Output in `data/<date>_<time>_threshold_scan/`: `thr_<mV>/` (one capture
+each), `scan.json`, `scan.csv`, `summary.txt`, and per channel
+`plots/ch<N>/`: rate against threshold, the ToT spectrum at each threshold
+(one panel each, around its median), ToT statistics against threshold.
+
+## ToT: pedestal, source, plots
+
+A pedestal is an ordinary run without the source, at the same threshold.
+Only the last step treats it differently.
+
+    # 1. take data: pedestal (no source), then with the source
+    python sw/host/collect_data.py -v 39 -t 600 -o data/pedestal_39mV data-yeeter.local
+    python sw/host/collect_data.py -v 39 -t 600 -o data/source_39mV data-yeeter.local
+
+    # 2. hits.csv -> tot.csv in each run folder
+    python sw/host/make_tot.py data/pedestal_39mV data/source_39mV
+
+    # 3. ToT histogram of one run, linear and log
+    python sw/host/plot_tot.py data/source_39mV
+
+    # 4. source minus pedestal
+    python sw/host/plot_tot_pedestal.py data/source_39mV data/pedestal_39mV
+
+Use `-t` (a fixed time) for these runs, not `-n`: the rates need the run time.
+
+**make_tot.py** writes `tot.csv` into each run folder: a few `# key: value`
+lines (run time, threshold, die temperature, calibration), then
+`channel,time_ns,tot_ns`, one row per hit. The calibration is the master
+nearest the run's die temperature; `--master FILE`, or `--master none` for raw
+equal bins. Scan points work too: `make_tot.py data/<scan>/thr_*`.
+
+**plot_tot.py** and **plot_tot_pedestal.py** have their settings as variables
+at the top (channel, bin width, ToT range, counts or rate, save, show): edit
+and run again. The PNGs go next to `tot.csv` (`tot_ch<N>.png`,
+`tot_ch<N>_log.png`; `tot_ch<N>_pedestal(_log).png` and
+`tot_ch<N>_net(_log).png` for the subtraction). The threshold in the titles is
+the real DAC value (requested mV rounded down to a step of 12.94 mV).
+
+The subtraction divides each histogram by its own run time, so the two runs
+may have different lengths, and gives each bin the Poisson error
+`sqrt(Ns/ts^2 + Np/tp^2)`. It also prints the net rate and the pedestal time
+that would give the smallest error for that signal time
+(`tp/ts = sqrt(pedestal rate / signal rate)`): a quiet pedestal needs less
+time than the source run.
+
+## make_master_cal.py
+
+    python sw/host/make_master_cal.py -v 4:200 data-yeeter.local          # 270 s window
+    python sw/host/make_master_cal.py -v 4:200 --window 60 data-yeeter.local
+    python sw/host/make_master_cal.py -v 2:150 data-yeeter.local          # 2-channel bitstream
+
+One long board calibration from the calibration input (card channel 4, a
+free-running generator near 100 MHz), saved as
+`calibrations/master_<date>_<time>_<temp>C.json` with the PL die temperature,
+in the format `test_tdc.py --cal` reads. 270 s gives about 100 million hits
+per delay line. Take it with the board warm (30 minutes or more after power-up):
+the tables move by about 0.5 ps per degree. `threshold_scan.py` uses the master
+nearest the die temperature of the scan. Masters are board-specific; the
+`calibrations/` folder is not in git. `-v 4:<mV>` (`2:<mV>` with the
+2-channel bitstream) sets only the calibration input's threshold. Lines
+without hits (channels the loaded bitstream does not have) are left out of
+the master and listed.
 
 ## test_tdc.py
 

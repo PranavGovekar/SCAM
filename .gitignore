@@ -61,5 +61,8 @@ sw/host/.venv/
 data/*
 !data/README.md
 
+# Master calibrations of the TDC (sw/host/make_master_cal.py); board-specific
+calibrations/
+
 # Python bytecode
 __pycache__/

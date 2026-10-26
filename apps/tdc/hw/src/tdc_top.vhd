@@ -22,12 +22,15 @@ entity tdc_top is
 
         fifo_overflow_count_o : out std_logic_vector(31 downto 0);
 
-        -- axi_gpio_config ch1: bit 0 requests calibration mode.
+        -- axi_gpio_config ch1: bit 0 requests calibration mode, bit 1 flush
+        -- (end of run: once every FIFO is empty, finish the open packet with
+        -- padding words so the DMA delivers it).
         config_i      : in  std_logic_vector(31 downto 0);
         -- axi_gpio_status2: hits dropped because a calibration FIFO was full.
         cal_status_o  : out std_logic_vector(31 downto 0);
         -- axi_gpio_flags: bit 0 = calibration mode in effect (the switch,
-        -- requested by config_i(0), is complete).
+        -- requested by config_i(0), is complete); bit 1 = flushed (flush
+        -- requested, every FIFO empty, no packet open).
         flags_o       : out std_logic_vector(31 downto 0);
 
         m_axis_tdata  : out std_logic_vector(127 downto 0);
@@ -96,7 +99,14 @@ architecture rtl of tdc_top is
     signal arbiter_idx  : integer range 0 to C_NUM_SOURCES - 1 := 0;
     signal packet_count : unsigned(15 downto 0) := (others => '0');
 
-    type state_t is (S_POLL, S_SEND, S_POP_FIFO);
+    -- Padding word for a flush: bits 127:120 = 0xCF, as the board program's
+    -- own padding; never taken for a hit.
+    constant C_PADDING  : std_logic_vector(127 downto 0) :=
+        (127 downto 126 => '1', 123 downto 120 => '1', others => '0');
+    constant C_NONE_VALID : std_logic_vector(C_NUM_SOURCES - 1 downto 0) := (others => '0');
+    signal flushed      : std_logic := '0';
+
+    type state_t is (S_POLL, S_SEND, S_POP_FIFO, S_SEND_PAD);
     signal state : state_t := S_POLL;
 
 begin
@@ -206,7 +216,7 @@ begin
         end if;
     end process;
 
-    flags_o <= (0 => cal_active_sync, others => '0');
+    flags_o <= (0 => cal_active_sync, 1 => flushed, others => '0');
 
     gen_channels: for i in 0 to G_NUM_CHANNELS - 1 generate
         inst_channel : entity work.tdc_channel
@@ -240,8 +250,16 @@ begin
                 ch_ready      <= (others => '0');
                 arbiter_idx   <= 0;
                 packet_count  <= (others => '0');
+                flushed       <= '0';
                 state         <= S_POLL;
             else
+                if config_i(1) = '1' and state = S_POLL and ch_valid = C_NONE_VALID
+                   and packet_count = 0 then
+                    flushed <= '1';
+                else
+                    flushed <= '0';
+                end if;
+
                 case state is
                     when S_POLL =>
                         m_axis_tvalid <= '0';
@@ -255,6 +273,14 @@ begin
                                 m_axis_tlast <= '1';
                             end if;
                             state <= S_SEND;
+                        elsif config_i(1) = '1' and ch_valid = C_NONE_VALID and packet_count /= 0 then
+                            -- Flush: every hit is out, finish the open packet.
+                            m_axis_tdata  <= C_PADDING;
+                            m_axis_tvalid <= '1';
+                            if packet_count = G_PACKET_SIZE - 1 then
+                                m_axis_tlast <= '1';
+                            end if;
+                            state <= S_SEND_PAD;
                         else
                             if arbiter_idx = C_NUM_SOURCES - 1 then
                                 arbiter_idx <= 0;
@@ -285,6 +311,19 @@ begin
                             arbiter_idx <= arbiter_idx + 1;
                         end if;
                         state <= S_POLL;
+
+                    when S_SEND_PAD =>
+                        -- As S_SEND, but no FIFO to pop.
+                        if m_axis_tready = '1' then
+                            m_axis_tvalid <= '0';
+                            m_axis_tlast  <= '0';
+                            if packet_count = G_PACKET_SIZE - 1 then
+                                packet_count <= (others => '0');
+                            else
+                                packet_count <= packet_count + 1;
+                            end if;
+                            state <= S_POLL;
+                        end if;
                 end case;
             end if;
         end if;

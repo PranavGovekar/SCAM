@@ -50,7 +50,14 @@
 #define CAL_SWITCH_TIMEOUT_US 100000
 
 #define CONFIG_CAL_REQUEST 0x1       /* axi_gpio_config ch1 bit 0 */
+#define CONFIG_FLUSH       0x2       /* axi_gpio_config ch1 bit 1 */
 #define FLAGS_CAL_ACTIVE   0x1       /* axi_gpio_flags bit 0 */
+#define FLAGS_FLUSHED      0x2       /* axi_gpio_flags bit 1 */
+
+/* End of a run: time for the firmware to report the flush (a bitstream
+ * without it never does), and for the last packet to arrive after it. */
+#define FLUSH_TIMEOUT_S    0.2
+#define FLUSH_LAST_US      1000
 
 /* Channel-ID field (bits 127:116) of a DMA word: 0x800 + ch is a
  * calibration record, anything without bit 11 a physics hit. */
@@ -87,7 +94,9 @@ static void on_sigint(int sig)
 
 /* Put the TDC logic in reset, restart the DMA, release the reset. The TDC is
  * left disabled. Resetting both together keeps the TDC's count of hits per
- * packet in step with the DMA transfer. */
+ * packet in step with the DMA transfer. The reset also empties every FIFO and
+ * drops the DMA transfer in progress, so nothing recorded before it (an
+ * earlier run, an earlier threshold) is sent. */
 static void reset_tdc_and_dma(void *gpio_ctrl, void *dma_ctrl)
 {
     write_reg(gpio_ctrl, GPIO_DATA, CTRL_RESET);
@@ -124,6 +133,24 @@ static int set_cal_mode(void *gpio_config, void *gpio_flags, int on)
         usleep(10);
     }
     return -1;
+}
+
+/* Time limit, hit limit, or asked to stop. */
+static int run_over(const app_args_t *a, time_t start_time, long hits_sent)
+{
+    return !keep_running ||
+           (a->max_seconds > 0 && (time(NULL) - start_time) >= a->max_seconds) ||
+           (a->max_hits > 0 && hits_sent >= a->max_hits);
+}
+
+/* End of a run: disable the TDC so no new hit is recorded, wait until the
+ * last ones are in the FIFOs, then ask for the flush (this also ends any
+ * calibration request). The flags report when everything has been sent. */
+static void begin_end(void *gpio_ctrl, void *gpio_config)
+{
+    write_reg(gpio_ctrl, GPIO_DATA, CTRL_CLEAR);
+    usleep(10);
+    write_reg(gpio_config, GPIO_DATA, CONFIG_FLUSH);
 }
 
 /* Packets of calibration words being assembled. */
@@ -287,10 +314,21 @@ int main(int argc, char **argv)
     uint32_t cal_drop0   = 0;
     long   cal_packets   = 0;
     long   cal_stray     = 0;
+    long   bad_words     = 0;
 
-    while (keep_running && !send_failed) {
-        if (args.max_seconds > 0 && (time(NULL) - start_time) >= args.max_seconds) break;
-        if (args.max_hits    > 0 && hits_sent >= args.max_hits) break;
+    /* End of the run: the TDC is disabled and the firmware hands over every
+     * hit it still holds, finishing the open packet with padding. */
+    int    ending        = 0;
+    int    finished      = 0;
+    double end_started   = 0;
+
+    while (!send_failed && !finished) {
+        if (!ending && run_over(&args, start_time, hits_sent)) {
+            begin_end(gpio_ctrl, gpio_config);
+            ending = 1;
+            end_started = now_s();
+            cal_running = 0;      /* an unfinished calibration window is not sent */
+        }
 
         /* The channel is ready for a new transfer here: it was just started,
          * or the previous transfer completed. Do not wait for the Idle status
@@ -299,15 +337,14 @@ int main(int argc, char **argv)
         write_reg(dma_ctrl, S2MM_DA, DMA_RAM_BASE + ram_offset);
         write_reg(dma_ctrl, S2MM_LENGTH, PACKET_SIZE_BYTES);
 
-        write_reg(gpio_ctrl, GPIO_DATA, CTRL_WAKEUP);
+        if (!ending) write_reg(gpio_ctrl, GPIO_DATA, CTRL_WAKEUP);
 
         int watchdog = 0;
         int dma_error = 0;
-        int timed_out = 0;
         for (;;) {
             /* Start or end a calibration window. Checked here, while waiting
              * for data, so a missing calibration signal cannot stall it. */
-            if (!cal_running && cal_next >= 0 && now_s() >= cal_next) {
+            if (!ending && !cal_running && cal_next >= 0 && now_s() >= cal_next) {
                 cal_drop0 = read_reg(gpio_caldrop, GPIO_DATA);
                 memset(histogram, 0, sizeof(histogram));
                 if (set_cal_mode(gpio_config, gpio_flags, 1) != 0) {
@@ -342,12 +379,29 @@ int main(int argc, char **argv)
             }
 
             if (read_reg(dma_ctrl, S2MM_SR) & S2MM_SR_IOC) break;
-            if (!keep_running) break;
-            /* A packet only completes after 90 hits, so the time limit has to
-             * be checked while waiting as well. */
-            if (args.max_seconds > 0 && (time(NULL) - start_time) >= args.max_seconds) {
-                timed_out = 1;
-                break;
+            /* A packet only completes after 90 hits, so the end of the run
+             * has to be checked while waiting as well. */
+            if (!ending && run_over(&args, start_time, hits_sent)) {
+                begin_end(gpio_ctrl, gpio_config);
+                ending = 1;
+                end_started = now_s();
+                cal_running = 0;
+            }
+            if (ending) {
+                /* Flushed: nothing is left but perhaps the packet the last
+                 * words went into. Give it time to arrive, then stop. */
+                if (read_reg(gpio_flags, GPIO_DATA) & FLAGS_FLUSHED) {
+                    usleep(FLUSH_LAST_US);
+                    if (read_reg(dma_ctrl, S2MM_SR) & S2MM_SR_IOC) break;
+                    finished = 1;
+                    break;
+                }
+                if (now_s() - end_started > FLUSH_TIMEOUT_S) {
+                    fprintf(stderr, "[WARN] no flush from the firmware (bitstream without it?); "
+                                    "the hits of an unfinished packet are lost\n");
+                    finished = 1;
+                    break;
+                }
             }
             usleep(POLL_SLEEP_US);
             if (++watchdog >= WATCHDOG_TICKS) {
@@ -361,8 +415,11 @@ int main(int argc, char **argv)
                 watchdog = 0;
             }
         }
-        if (!keep_running || timed_out || send_failed) break;
-        if (dma_error) continue;
+        if (finished || send_failed) break;
+        if (dma_error) {
+            if (ending) break;
+            continue;
+        }
 
         write_reg(dma_ctrl, S2MM_SR, S2MM_SR_IOC);
         __sync_synchronize();
@@ -377,7 +434,7 @@ int main(int argc, char **argv)
             memcpy(&lo, in, 8);
             memcpy(&hi, in + 8, 8);
             unsigned id = (unsigned)(hi >> 52);
-            if (!(id & ID_CAL_RECORD)) {
+            if (id < NUM_LINES / 2) {
                 memcpy(out + out_words * HIT_SIZE_BYTES, in, HIT_SIZE_BYTES);
                 if (++out_words == HITS_PER_PACKET) {
                     if (udp_send(&sock, out, PACKET_SIZE_BYTES) < 0) { send_failed = 1; break; }
@@ -385,17 +442,35 @@ int main(int argc, char **argv)
                     packets_sent++;
                     hits_sent += HITS_PER_PACKET;
                 }
-            } else if (cal_running && (id & ~ID_CAL_RECORD) < NUM_LINES / 2) {
-                int line = (int)(id & ~ID_CAL_RECORD) * 2;
-                histogram[line][lo & 0x3FF]++;
-                histogram[line + 1][((lo >> 58) | (hi << 6)) & 0x3FF]++;
+            } else if (id >= ID_CAL_RECORD && id - ID_CAL_RECORD < NUM_LINES / 2) {
+                if (cal_running) {
+                    int line = (int)(id - ID_CAL_RECORD) * 2;
+                    histogram[line][lo & 0x3FF]++;
+                    histogram[line + 1][((lo >> 58) | (hi << 6)) & 0x3FF]++;
+                } else {
+                    cal_stray++;
+                }
+            } else if ((hi >> 56) == WORD_PADDING) {
+                /* The firmware's padding after the last hit of a run. */
             } else {
-                cal_stray++;
+                /* Neither a hit nor a calibration record: never sent. */
+                bad_words++;
             }
         }
 
         ram_offset += PACKET_SIZE_BYTES;
         if (ram_offset + PACKET_SIZE_BYTES > DMA_RAM_SIZE) ram_offset = 0;
+    }
+
+    /* The last hits, fewer than a packet: send them padded. */
+    if (out_words > 0 && !send_failed) {
+        int hits = out_words;
+        while (out_words < HITS_PER_PACKET)
+            put_word(out + out_words++ * HIT_SIZE_BYTES, 0, (uint64_t)WORD_PADDING << 56);
+        if (udp_send(&sock, out, PACKET_SIZE_BYTES) == 0) {
+            packets_sent++;
+            hits_sent += hits;
+        }
     }
 
     /* Disable first so the overflow counter stops changing, read it, and only
@@ -417,6 +492,7 @@ int main(int argc, char **argv)
                cal_count, cal_packets);
         if (cal_stray) printf("Cal. records outside a window: %ld (discarded)\n", cal_stray);
     }
+    if (bad_words) printf("Unknown words : %ld (discarded)\n", bad_words);
 
     udp_close(&sock);
     return 0;

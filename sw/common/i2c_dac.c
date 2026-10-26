@@ -17,6 +17,10 @@
 #define MUX_CHANNEL_LINK "/sys/bus/i2c/devices/1-0075/channel-0"
 #define DAC5578_ADDR    0x48
 #define DAC_VREF_MV     3300
+/* On the FMC DIO card each DAC output reaches its comparator through 10 kohm
+ * and 100 nF (1 ms). A full-scale step settles to one DAC step in about 6 ms;
+ * wait 20 ms so no hit is taken at the old threshold. */
+#define DAC_SETTLE_US   20000
 
 /* Open the I2C bus that reaches the FMC HPC0 connector. Returns an fd, or -1. */
 static int open_hpc0_bus(void)
@@ -97,6 +101,7 @@ int i2c_dac_set_channel(int channel, int millivolts)
     }
 
     close(fd);
+    usleep(DAC_SETTLE_US);
     if (channel == I2C_DAC_ALL)
         printf("DAC threshold set to %d mV (code 0x%02X)\n", millivolts, code);
     else
