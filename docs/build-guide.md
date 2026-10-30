@@ -40,8 +40,9 @@ needs. Everything can also be given on the `make` command line.
 | `SCAM_HOSTNAME` | host name of the board (letters, digits and `-`) | `data-yeeter` |
 | `SCAM_IP` | board Ethernet address: `dhcp`, or fixed such as `192.168.1.50/24` | `dhcp` |
 | `SCAM_GATEWAY` | gateway for a fixed address (optional) | none |
+| `SCAM_DNS` | DNS servers, separated by spaces or commas (optional; with DHCP the server's are used) | none |
 
-`SCAM_HOSTNAME`, `SCAM_IP` and `SCAM_GATEWAY` are built into the image: after
+`SCAM_HOSTNAME`, `SCAM_IP`, `SCAM_GATEWAY` and `SCAM_DNS` are built into the image: after
 changing them, run `make petalinux` (and `make image` if you use the image file) again.
 
 ## Applications

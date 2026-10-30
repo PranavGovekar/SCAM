@@ -12,7 +12,7 @@ PETALINUX_ENV ?= host
 SD ?= /dev/sdX
 
 export PETALINUX_ENV PETALINUX_ROOT VIVADO VIVADO_SETTINGS SCAM_APPS SCAM_SDK SCAM_JOBS
-export SCAM_HOSTNAME SCAM_IP SCAM_GATEWAY
+export SCAM_HOSTNAME SCAM_IP SCAM_GATEWAY SCAM_DNS
 
 # Paths
 # The base XSA has exactly one home: hw/base/system.xsa. It must NOT live in

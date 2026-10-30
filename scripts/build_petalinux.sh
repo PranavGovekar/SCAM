@@ -69,7 +69,8 @@ show_petalinux_log() {
     echo "" >&2
 }
 
-# Board network identity, from config.mk (SCAM_HOSTNAME, SCAM_IP, SCAM_GATEWAY).
+# Board network identity, from config.mk (SCAM_HOSTNAME, SCAM_IP, SCAM_GATEWAY,
+# SCAM_DNS).
 # The values are written into project-spec/configs/config before every
 # configure and build; PetaLinux then puts the host name into /etc/hostname and
 # the address into systemd's wired.network.
@@ -79,7 +80,9 @@ apply_network_settings() {
     local hostname="${SCAM_HOSTNAME:-data-yeeter}"
     local ip="${SCAM_IP:-dhcp}"
     local gateway="${SCAM_GATEWAY:-}"
-    local addr="" prefix="" netmask="" octet i bits
+    local dns="${SCAM_DNS:-}"
+    local dns_conf="$petalinux_project/project-spec/meta-user/recipes-core/systemd-conf/files/scam-dns.conf"
+    local addr="" prefix="" netmask="" octet i bits server
     local ipv4='^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$'
 
     [[ -f "$cfg" ]] || return 0
@@ -122,6 +125,29 @@ apply_network_settings() {
         done
     fi
 
+    # DNS servers go to systemd-resolved through the systemd-conf bbappend in
+    # meta-user. Without SCAM_DNS the file stays empty: the DHCP server's DNS
+    # is used, and a fixed address has none.
+    dns="${dns//,/ }"
+    for server in $dns; do
+        if [[ ! "$server" =~ $ipv4 ]]; then
+            echo "SCAM_DNS '$server' is not a valid IPv4 address." >&2
+            exit 1
+        fi
+    done
+    mkdir -p "$(dirname "$dns_conf")"
+    if [[ -n "${dns// /}" ]]; then
+        printf '[Resolve]\nDNS=%s\n' "$(echo $dns)" > "$dns_conf.new"
+    else
+        printf '# No DNS servers set (SCAM_DNS in config.mk).\n' > "$dns_conf.new"
+    fi
+    # Rewrite only on a change, so BitBake does not rebuild systemd-conf.
+    if cmp -s "$dns_conf.new" "$dns_conf"; then
+        rm -f "$dns_conf.new"
+    else
+        mv "$dns_conf.new" "$dns_conf"
+    fi
+
     local new="$cfg.scam-new"
     grep -v -E "^(# )?(CONFIG_SUBSYSTEM_HOSTNAME|${eth}_(USE_DHCP|IP_ADDRESS|IP_NETMASK|IP_GATEWAY))[= ]" \
         "$cfg" > "$new" || true
@@ -152,6 +178,8 @@ apply_network_settings() {
     else
         echo "==> Network: host name $hostname, static $addr/$prefix${gateway:+, gateway $gateway}"
     fi
+    [[ -n "${dns// /}" ]] && echo "==> DNS: $(echo $dns)"
+    return 0
 }
 
 pushd "$petalinux_project" > /dev/null

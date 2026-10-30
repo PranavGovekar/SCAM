@@ -29,3 +29,7 @@
 # Takes effect in the image built by the next 'make petalinux'.
 #SCAM_IP := 192.168.1.50/24
 #SCAM_GATEWAY := 192.168.1.1
+
+# DNS servers, separated by spaces or commas. Optional: with DHCP the DHCP
+# server's are used; a fixed address has none without this.
+#SCAM_DNS := 192.168.1.1

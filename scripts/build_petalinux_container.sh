@@ -87,6 +87,7 @@ docker "${docker_args[@]}" \
     --env "SCAM_HOSTNAME=${SCAM_HOSTNAME:-}" \
     --env "SCAM_IP=${SCAM_IP:-}" \
     --env "SCAM_GATEWAY=${SCAM_GATEWAY:-}" \
+    --env "SCAM_DNS=${SCAM_DNS:-}" \
     --env "SCAM_HOST_DL_DIR=$cache_root/build/downloads" \
     --workdir /workspace \
     "$image" \

@@ -33,6 +33,8 @@ petalinux/project-spec/configs/flash_parts.txt
 petalinux/project-spec/attributes
 petalinux/project-spec/hw-description/psu_init*.*
 petalinux/project-spec/configs/systemd-conf/
+# Written from SCAM_DNS by scripts/build_petalinux.sh
+petalinux/project-spec/meta-user/recipes-core/systemd-conf/files/
 # Staged from sw/common and apps/*/sw by scripts/stage_assets.sh
 petalinux/project-spec/meta-user/recipes-apps/*/files/*.c
 petalinux/project-spec/meta-user/recipes-apps/*/files/*.h
