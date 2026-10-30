@@ -39,11 +39,11 @@ prebuilt image without touching the rest of the repository: see
 
 Nothing has to be built for this.
 
-1. Download `scam-zcu102.img.xz` from the release.
-2. Write it to an SD card of 8 GB or more with Rufus or balenaEtcher (both
-   read the `.img.xz` directly), or on Linux:
-   `xz -dc scam-zcu102.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync`.
-   Everything on the card is erased.
+1. Download `scam-zcu102.img.xz` from the
+   [Releases](../../releases) page (about 70 MB; it holds a 6 GB card image).
+2. Write it to an SD card of 8 GB or more, as described in
+   [Writing the SD card](#writing-the-sd-card). Everything on the card is
+   erased.
 3. Set the ZCU102 boot mode switch SW6 to SD: position 1 ON, positions 2, 3
    and 4 OFF. Insert the card, connect Ethernet, power on.
 4. The board loads the TDC bitstream by itself and asks the network for an
@@ -58,6 +58,31 @@ Nothing has to be built for this.
        sw/host/.venv/bin/pip install -r sw/host/requirements.txt  # once
        source sw/host/.venv/bin/activate                    # in each new terminal
        python sw/host/collect_data.py -v 250 -n 18000 <board-ip>
+
+### Writing the SD card
+
+`scam-zcu102.img.xz` is the whole card, compressed: the boot partition (FAT,
+2 GB) and the Linux root file system (ext4, 4 GB) are both inside it. Do not
+format or partition the card first, and do not unpack the file; the tools
+below do that themselves and replace everything on the card.
+
+**balenaEtcher** (Windows, macOS, Linux): *Flash from file*, choose
+`scam-zcu102.img.xz`; *Select target*, choose the SD card; *Flash!*. It
+checks the card after writing.
+
+**Rufus** (Windows): *Device*, choose the SD card; *Boot selection*,
+*SELECT* and choose `scam-zcu102.img.xz`; *START*.
+
+**Linux command line:** find the card with `lsblk` (plug it in and look for
+the new disk of the card's size, e.g. `/dev/sdb` or `/dev/mmcblk0`). Use the
+whole disk, not a partition such as `/dev/sdb1`; a wrong name erases that
+disk. Unmount it if the desktop mounted it, then write:
+
+    sudo umount /dev/sdX?*
+    xz -dc scam-zcu102.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
+
+After writing, Windows sees only the small boot partition and may say the
+other one must be formatted: cancel, it is the Linux partition and is fine.
 
 ---
 
