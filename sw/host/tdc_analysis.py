@@ -102,14 +102,31 @@ def peak_stats(tot, bin_ps):
 # ---------------------------------------------------------------- calibrations
 
 MASTER_DIR = Path(__file__).resolve().parents[2] / "calibrations"
+SELF_CAL_NAME = "self_calibration.json"
 
 
 def load_cal(path):
-    """Tables {line name: t_ps array} of a calibration file (collect_data's
-    calibrations/cal_<n>.json, test_tdc.py's calibration.json, or a master)."""
+    """Tables {line name: t_ps array} of a calibration file (a run's
+    calibrations/cal_<n>.json or self_calibration.json, test_tdc.py's
+    calibration.json, or a master)."""
     with open(path) as f:
         cal = json.load(f)
     return {name: np.array(line["t_ps"]) for name, line in cal["lines"].items()}
+
+
+def load_cal_segments(path):
+    """One calibration file, or every cal_<n>.json of a folder, as
+    [(first hit row, tables, file name)]. Each cal_<n>.json is used from its
+    first_hit_row on; the first one also covers the hits before it."""
+    path = Path(path)
+    files = sorted(path.glob("cal_*.json")) if path.is_dir() else [path]
+    if not files:
+        raise FileNotFoundError(f"no cal_*.json in {path}")
+    segments = []
+    for i, f in enumerate(files):
+        row = 0 if i == 0 else json.loads(f.read_text()).get("first_hit_row", 0)
+        segments.append((row, load_cal(f), f.name))
+    return segments
 
 
 def find_master(temp_c=None, folder=MASTER_DIR):
@@ -129,6 +146,39 @@ def find_master(temp_c=None, folder=MASTER_DIR):
     else:
         path, t = min(masters, key=lambda m: abs(temp_c - m[1]) if m[1] is not None else 1e9)
     return path, t, (None if temp_c is None or t is None else temp_c - t)
+
+
+def run_calibration(run_dir, cal=None):
+    """The calibration for a run, as (segments for load_cal_segments' format,
+    description). cal: a file or folder to use, "none" for equal bins, or
+    None to look in this order:
+        <run>/calibrations/self_calibration.json  (make_self_cal.py)
+        <run>/calibrations/cal_<n>.json           (collect_data.py --cal-window)
+        the master in calibrations/ nearest the run's die temperature
+        nothing: equal bins (empty list)"""
+    if cal == "none":
+        return [], "none (equal bins)"
+    if cal:
+        segments = load_cal_segments(cal)
+        return segments, describe(cal, segments)
+    own = Path(run_dir) / "calibrations"
+    if (own / SELF_CAL_NAME).exists():
+        return load_cal_segments(own / SELF_CAL_NAME), f"calibrations/{SELF_CAL_NAME} of the run"
+    if any(own.glob("cal_*.json")):
+        segments = load_cal_segments(own)
+        return segments, describe("calibrations/ of the run", segments)
+    found = find_master(run_die_temp(read_run_info(run_dir)))
+    if found:
+        path, t, dt = found
+        note = f"{path.name}" + ("" if dt is None else f" (made at {t} C, run {dt:+.1f} C from it)")
+        return load_cal_segments(path), note
+    return [], "none found (equal bins)"
+
+
+def describe(name, segments):
+    if len(segments) == 1:
+        return f"{name}"
+    return f"{name}: " + ", ".join(f"{n} from row {row}" for row, _, n in segments)
 
 
 def read_run_info(run_dir):

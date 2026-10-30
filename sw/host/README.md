@@ -9,11 +9,10 @@ Run on the PC. Each run is saved in its own folder under `data/` (see
 | `threshold_scan.py` | TDC: rate and ToT of detector pulses against threshold, per channel |
 | `make_master_cal.py` | TDC: one long board calibration, kept in `calibrations/` as a master |
 | `make_tot.py` | TDC: a run's `hits.csv` to `tot.csv` (time and ToT in ns, calibrated) |
+| `make_self_cal.py` | TDC: code-density calibration from a run's own hits |
 | `plot_tot.py` | TDC: ToT histogram of one `tot.csv`, linear and log |
-| `plot_tot_pedestal.py` | TDC: ToT of a source run minus a pedestal run |
 | `test_tdc.py` | TDC test: collects 1 million hits, plots ToT, calibrates the delay lines, plots again |
-| `test_tdc_cal_hits.py` | TDC test: how many hits the code-density calibration needs |
-| `tdc_analysis.py` | library: ToT, code density, calibration files, master lookup (used by the scripts above) |
+| `tdc_analysis.py` | library: ToT, code density, calibration files (used by the scripts above) |
 
 ## Install
 
@@ -33,14 +32,13 @@ detected.
 
 ## Threshold
 
-Every run needs `-v <mV>`, the input threshold of the FMC DIO card, about half
-the pulse height. The card powers up at 0 V and then sees no pulses; the
-setting stays until the board loses power.
+Every run needs `-v <mV>`, the input threshold of the FMC DIO card. The card
+powers up at 0 V and then sees no pulses; the setting stays until the board
+loses power. The numbers in the examples in this file only show the syntax.
 
 `-v 250` sets every channel. `-v 0:120,1:150` sets only the card channels
 named (card channel k is TDC channel k) and leaves the others as they are.
-The calibration input is card channel 4 with the 4-channel TDC bitstream and
-card channel 2 with the 2-channel one. The card's DAC channels are wired out
+The calibration input is card channel 4. The card's DAC channels are wired out
 of order (card channel 3 is DAC channel 7); `collect_data.py` takes card
 channels, the board's `threshold -c` takes DAC channels.
 
@@ -104,6 +102,7 @@ saved.
 
     python sw/host/collect_data.py -v 250 -n 1000000 --cal-window 1 data-yeeter.local
     python sw/host/test_tdc.py --csv data/<run>/hits.csv --cal data/<run>/calibrations/cal_000.json
+    python sw/host/make_tot.py data/<run>      # uses the run's calibrations
 
 CT CSV (one 8-byte packet per event, decoded by `parse_ct`):
 
@@ -122,8 +121,8 @@ scanned channel is analysed. It only reports; it does not set the thresholds
 for later runs.
 
 Reported per channel and threshold: hits, rate, FIFO overflows, packets lost,
-and the ToT with each calibration (raw; the master nearest the die
-temperature, or `--master FILE`): mean, median, RMS, fitted sigma, FWHM,
+and the ToT, with equal bins and with the master nearest the die temperature
+of the scan (or `--cal FILE`; `--cal none` for equal bins only): mean, median, RMS, fitted sigma, FWHM,
 percentiles 5/25/75/95 % and the fraction of short pulses (`--short-ns`,
 default 2 ns). `summary.txt` marks where the rate is flat against threshold
 (neighbouring points within 20 %) and suggests the middle of that plateau:
@@ -139,61 +138,62 @@ each), `scan.json`, `scan.csv`, `summary.txt`, and per channel
 `plots/ch<N>/`: rate against threshold, the ToT spectrum at each threshold
 (one panel each, around its median), ToT statistics against threshold.
 
-## ToT: pedestal, source, plots
+## ToT: make_self_cal.py, make_tot.py and plot_tot.py
 
-A pedestal is an ordinary run without the source, at the same threshold.
-Only the last step treats it differently.
-
-    # 1. take data: pedestal (no source), then with the source
-    python sw/host/collect_data.py -v 39 -t 600 -o data/pedestal_39mV data-yeeter.local
-    python sw/host/collect_data.py -v 39 -t 600 -o data/source_39mV data-yeeter.local
-
-    # 2. hits.csv -> tot.csv in each run folder
-    python sw/host/make_tot.py data/pedestal_39mV data/source_39mV
-
-    # 3. ToT histogram of one run, linear and log
-    python sw/host/plot_tot.py data/source_39mV
-
-    # 4. source minus pedestal
-    python sw/host/plot_tot_pedestal.py data/source_39mV data/pedestal_39mV
-
-Use `-t` (a fixed time) for these runs, not `-n`: the rates need the run time.
+    python sw/host/make_self_cal.py data/run_a            # optional: calibrate from the run's hits
+    python sw/host/make_tot.py data/run_a data/run_b      # hits.csv -> tot.csv in each run folder
+    python sw/host/plot_tot.py data/run_a                 # ToT histogram, linear and log
 
 **make_tot.py** writes `tot.csv` into each run folder: a few `# key: value`
 lines (run time, threshold, die temperature, calibration), then
-`channel,time_ns,tot_ns`, one row per hit. The calibration is the master
-nearest the run's die temperature; `--master FILE`, or `--master none` for raw
-equal bins. Scan points work too: `make_tot.py data/<scan>/thr_*`.
+`channel,time_ns,tot_ns`, one row per hit. Scan points work too:
+`make_tot.py data/<scan>/thr_*`.
 
-**plot_tot.py** and **plot_tot_pedestal.py** have their settings as variables
-at the top (channel, bin width, ToT range, counts or rate, save, show): edit
-and run again. The PNGs go next to `tot.csv` (`tot_ch<N>.png`,
-`tot_ch<N>_log.png`; `tot_ch<N>_pedestal(_log).png` and
-`tot_ch<N>_net(_log).png` for the subtraction). The threshold in the titles is
-the real DAC value (requested mV rounded down to a step of 12.94 mV).
+The calibration is found by itself, the first of these that exists:
 
-The subtraction divides each histogram by its own run time, so the two runs
-may have different lengths, and gives each bin the Poisson error
-`sqrt(Ns/ts^2 + Np/tp^2)`. It also prints the net rate and the pedestal time
-that would give the smallest error for that signal time
-(`tp/ts = sqrt(pedestal rate / signal rate)`): a quiet pedestal needs less
-time than the source run.
+| Order | Calibration | Made by | Used for |
+| :-- | :-- | :-- | :-- |
+| 1 | `<run>/calibrations/self_calibration.json` | `make_self_cal.py` | every hit of the run |
+| 2 | `<run>/calibrations/cal_<n>.json` | `collect_data.py --cal-window` | each from the hit it was taken before (`first_hit_row`); the first also for the hits before it |
+| 3 | `calibrations/master_*.json` in the repository | `make_master_cal.py` | every hit; the master nearest the run's die temperature |
+| 4 | none | | every fine code counts as an equal bin |
+
+A run always gives one `tot.csv`, however many calibrations it has. The
+calibration used is printed and written into the header of `tot.csv`.
+`--cal FILE` (any calibration file) or `--cal FOLDER` (a `calibrations/`
+folder) uses that instead; `--cal none` gives equal bins.
+
+**make_self_cal.py** makes `<run>/calibrations/self_calibration.json` from
+the run's own hits by code density, in the same format as every other
+calibration file. It needs hits that arrive at random times (detector pulses;
+not a generator near a multiple of the 400 MHz TDC clock) and about 50 hits
+per code, some 30000 per line. It prints per line the hits, code range and
+empty codes, and warns when more than 10 % of the codes inside the range are
+empty or a line has too few hits. Channels with fewer than 1000 hits are left
+out. Delete the file to go back to the run's board calibrations or a master.
+
+**plot_tot.py** has its settings as variables at the top (channel, bin width,
+ToT range, counts or rate, save, show): edit and run again. The PNGs go next
+to `tot.csv` (`tot_ch<N>.png`, `tot_ch<N>_log.png`). The threshold in the
+titles is the real DAC value (requested mV rounded down to a step of
+12.94 mV). For rates, take the run with `-t` (a fixed time): they are worked
+out from `run_seconds`.
 
 ## make_master_cal.py
 
     python sw/host/make_master_cal.py -v 4:200 data-yeeter.local          # 270 s window
     python sw/host/make_master_cal.py -v 4:200 --window 60 data-yeeter.local
-    python sw/host/make_master_cal.py -v 2:150 data-yeeter.local          # 2-channel bitstream
 
 One long board calibration from the calibration input (card channel 4, a
 free-running generator near 100 MHz), saved as
 `calibrations/master_<date>_<time>_<temp>C.json` with the PL die temperature,
 in the format `test_tdc.py --cal` reads. 270 s gives about 100 million hits
 per delay line. Take it with the board warm (30 minutes or more after power-up):
-the tables move by about 0.5 ps per degree. `threshold_scan.py` uses the master
-nearest the die temperature of the scan. Masters are board-specific; the
-`calibrations/` folder is not in git. `-v 4:<mV>` (`2:<mV>` with the
-2-channel bitstream) sets only the calibration input's threshold. Lines
+the tables move by about 0.5 ps per degree, so the die temperature is in the
+name. `make_tot.py` and `threshold_scan.py` use the master nearest the die
+temperature of a run when it has no calibration of its own; `test_tdc.py`
+takes one with `--cal`. Masters are board-specific; the
+`calibrations/` folder is not in git. `-v 4:<mV>` sets only the calibration input's threshold. Lines
 without hits (channels the loaded bitstream does not have) are left out of
 the master and listed.
 
@@ -228,46 +228,3 @@ Output in `data/<date>_<time>_tdc_test/`:
 Reference result (100 MHz square wave, 0 to 500 mV, threshold 250 mV,
 channel 0): about 663 codes per clock period, mean bin 3.8 ps, ToT 4.727 ns,
 RMS 15 ps raw and 5.8 ps calibrated.
-
-## test_tdc_cal_hits.py
-
-    python sw/host/test_tdc_cal_hits.py -v 250 -n 20000000 data-yeeter.local  # collect + analyse
-    python sw/host/test_tdc_cal_hits.py --csv data/<run>/hits.csv             # analyse a run again
-
-How many hits the code-density calibration needs. One large capture is cut up:
-1 million hits are held out and only used to measure ToT; from the rest,
-sets of N = 1000, 2000 ... 9000, 10000, 20000 ... hits (up to 10 separate
-sets per N) each calibrate both delay lines, and the held-out ToT is computed
-with every calibration. Same signal as `test_tdc.py`. A 20 million hit capture
-takes under a minute on the board; the analysis needs about 1.5 GB of memory
-per 10 million hits.
-
-Options: `-n` hits the board sends (default 11000000; ask for more if packets
-are lost), `--channel`, `--test-hits` (default 1000000), `--repeats`
-(default 10), `--seed`.
-
-Output in `<run>/cal_hits/`:
-
-- `summary.txt`: per N the held-out ToT RMS (mean and spread over the sets),
-  the RMS when calibrating and measuring on the same hits, the scatter of the
-  ToT mean between calibrations and the error of one delay line's table; a fit
-  RMS² = a + b/N and the N where the RMS is within 10, 5 and 1 % of its best;
-  the N needed for the ToT mean and for one delay line to be right to 1 ps
-- `results.csv`: one row per (N, set)
-- `plots/ch<N>_rms_vs_hits.png`, `ch<N>_cal_error_vs_hits.png`,
-  `ch<N>_tot_by_hits.png`
-
-What it showed (100 MHz, 18.9 million hits, channel 0, 2026-10-16):
-
-- ToT RMS is within 1 % of its best (6.02 ps) from about 15000 hits. That
-  is a weak test of the calibration: start and stop are calibrated with the
-  same pulses, so most of the counting error cancels in the ToT and only
-  shifts the whole peak.
-- The ToT mean and a single delay line (what timing one channel against
-  another needs) are right to about 1 ps only from about 1 million hits,
-  following counting statistics: one line's error is 2.5 ns / sqrt(6 N).
-- 1 million hits, the `test_tdc.py` default, is therefore the minimum for a
-  calibration used for absolute times.
-
-The summary warns when the hits leave codes empty (see the 97.3 MHz note under
-`test_tdc.py`); everything it reports is then wrong.

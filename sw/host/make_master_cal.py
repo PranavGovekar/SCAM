@@ -9,9 +9,9 @@ the PL die temperature, as
 
     calibrations/master_<date>_<time>_<temp>C.json
 
-in the format test_tdc.py --cal reads. The analysis scripts pick the master
-nearest the die temperature of a run (tdc_analysis.find_master): the tables
-change by about 0.5 ps per C.
+in the format test_tdc.py --cal reads. Use it with --cal in make_tot.py,
+test_tdc.py and threshold_scan.py. The tables change by about 0.5 ps per C,
+so the die temperature is part of the name.
 
 The gate passes one generator pulse in 256 per channel: about 380 k hits per
 line per second at 97 MHz, a little fewer with 4 channels (the readout limit
@@ -21,9 +21,8 @@ Let the board warm up first (30 min or more after power-up).
     python make_master_cal.py -v 4:200 data-yeeter.local            # 270 s
     python make_master_cal.py -v 4:200 --window 60 data-yeeter.local
 
--v sets the thresholds as in collect_data.py; 4:<mV> (2:<mV> with the
-2-channel bitstream) sets only the calibration input and leaves the signal
-channels as they are.
+-v sets the thresholds as in collect_data.py; 4:<mV> sets only the
+calibration input and leaves the signal channels as they are.
 """
 
 import argparse

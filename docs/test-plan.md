@@ -21,8 +21,7 @@ Run in order. Each step must pass before the next is attempted.
 
 - Connect a pulse generator on its own clock to FMC DIO channel 0 (and 1 to
   3). User LEDs 5 to 7 light while inputs 0 to 2 are above the threshold; set it
-  first with `sudo threshold <mV>`, about half the pulse height (it powers up
-  at 0 V).
+  first with `sudo threshold <mV>` (it powers up at 0 V).
 - Use a 100 MHz square wave. Some other frequencies (97.3 MHz, for one) trap
   the recorded pulses in a few clock phases because of the TDC's dead time,
   and the calibration comes out wrong; `summary.txt` then warns about empty

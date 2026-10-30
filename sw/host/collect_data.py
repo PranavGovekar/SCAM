@@ -11,7 +11,7 @@ Usage:
     python collect_data.py --no-ssh -t 30 data-yeeter.local   # board program started by hand
     python collect_data.py -v 250 -n 1000000 --cal-window 1 data-yeeter.local  # calibrate first
     python collect_data.py -v 0:120,1:150 -t 60 data-yeeter.local   # a threshold per channel
-    python collect_data.py -v 39 -t 600 -o data/pedestal_39mV data-yeeter.local   # name the run
+    python collect_data.py -v 100 -t 600 -o data/my_run data-yeeter.local   # name the run
 
 The input threshold (-v, millivolts) is required: the FMC DIO card powers up
 with its threshold at 0 V and then sees no pulses. -v 250 sets every channel;
@@ -150,7 +150,7 @@ def decode_calibrations(words):
             if cur is None or cur["board_cal_id"] != cal_id or LINE_NAMES[line] in cur["_lines"]:
                 cur = {"clock_period_ps": CLOCK_PERIOD_PS, "source": "board",
                        "board_cal_id": cal_id, "first_hit_row": int(row),
-                       "window_ms": int(lo & 0xFFFF), "_lines": {}}
+                       "_lines": {}}
                 cals.append(cur)
             code_lo, code_hi = int((lo >> 54) & 0x3FF), int((lo >> 44) & 0x3FF)
             flags = int((hi >> 32) & 0xFFF)
@@ -295,7 +295,7 @@ def raw_to_csv(raw_path, csv_path, app, max_events):
     return rows_written, cal_words, unknown_words
 
 
-def save_calibrations(out_dir, cal_words):
+def save_calibrations(out_dir, cal_words, window_s):
     """Write calibrations/cal_<n>.json. Returns summary lines for run.txt and
     the number of calibrations."""
     cals = decode_calibrations(cal_words)
@@ -306,10 +306,13 @@ def save_calibrations(out_dir, cal_words):
     lines = []
     for n, cal in enumerate(cals):
         path = folder / f"cal_{n:03d}.json"
+        # The board's header has the window in 16-bit ms (65535 for any window
+        # over 65.5 s); the requested length is the real one.
+        cal["window_s"] = window_s
         with open(path, "w") as f:
             json.dump(cal, f)
         lines.append(f"calibration {n}: {path.name}, before hit row {cal['first_hit_row']}, "
-                     f"window {cal['window_ms']} ms")
+                     f"window {window_s:g} s")
         for name, line in cal["lines"].items():
             lo, hi = line["codes"]
             flags = ", ".join(line["flag_names"]) or "ok"
@@ -525,7 +528,7 @@ def capture(host, app="tdc", threshold_mv=None, max_events=None, max_seconds=Non
     print("[data] decoding")
     rows, cal_words, unknown_words = raw_to_csv(raw_path, csv_path, app, max_events)
     raw_path.unlink()
-    cal_lines, n_cals = save_calibrations(out_dir, cal_words)
+    cal_lines, n_cals = save_calibrations(out_dir, cal_words, cal_window)
     # Time the board recorded hits: the stream minus its calibration windows.
     run_s = stream_s - n_cals * (cal_window or 0) if stream_s else None
 
@@ -610,7 +613,7 @@ def main():
         ap.error("--cal-every must be longer than --cal-window")
 
     if args.threshold is None and not args.no_ssh:
-        ap.error("choose an input threshold with -v <mV> (about half the pulse height); "
+        ap.error("set an input threshold with -v <mV>; "
                  "the card powers up at 0 V and then sees nothing")
     if args.threshold is not None:
         try:

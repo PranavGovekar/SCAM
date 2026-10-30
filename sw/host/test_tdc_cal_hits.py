@@ -354,7 +354,7 @@ def main():
     ap = argparse.ArgumentParser(description="ToT RMS vs number of calibration hits")
     ap.add_argument("host", nargs="?", help="board address, e.g. data-yeeter.local")
     ap.add_argument("-v", "--threshold", type=int, metavar="MV",
-                    help="input threshold in mV, about half the pulse height (required to collect)")
+                    help="input threshold in mV (required to collect)")
     ap.add_argument("-n", "--hits", type=int, default=DEFAULT_COLLECT,
                     help=f"hits the board sends (default {DEFAULT_COLLECT:,}); "
                          "ask for more if packets are lost")
@@ -374,7 +374,7 @@ def main():
         if not args.host:
             ap.error("give the board address, or --csv to analyse an existing run")
         if args.threshold is None:
-            ap.error("choose an input threshold with -v <mV> (about half the pulse height); "
+            ap.error("set an input threshold with -v <mV>; "
                      "the card powers up at 0 V and then sees nothing")
         run_dir = collect_data.new_run_dir("tdc_cal_hits")
         _, csv_path, rows = collect_data.capture(args.host, "tdc", args.threshold,

@@ -11,8 +11,9 @@ Reported per channel and threshold (everything; pick what you need):
     hits, rate (hits per second), board FIFO overflows, packets lost
     ToT with each calibration: mean, median, RMS, fitted sigma, FWHM,
     percentiles 5/25/75/95 %, fraction of short pulses (ToT < --short-ns)
-Calibrations: raw (equal bins), master (the master calibration nearest the
-die temperature, see make_master_cal.py, or --master FILE), and with --self
+Calibrations: raw (equal bins), calibrated (the master in calibrations/
+nearest the die temperature, see make_master_cal.py, or --cal FILE; --cal none
+for none), and with --self
 a code-density calibration from the scan point's own hits (only right when
 the pulses arrive at random times and there are enough of them).
 
@@ -86,7 +87,7 @@ def tot_stats(tot, bin_ps, short_ps):
     return out
 
 
-def analyse_point(run_dir, mv, channels, settings, master_tables):
+def analyse_point(run_dir, mv, channels, settings, cal_tables):
     data = load_hits(run_dir)
     info = read_run_info(run_dir)
     # The board ran for the whole -t unless -n was reached first; then the
@@ -105,8 +106,8 @@ def analyse_point(run_dir, mv, channels, settings, master_tables):
                "die_temp_c": run_die_temp(info)}
         if len(h) >= MIN_TOT_HITS:
             tables = {"raw": (raw_table(h[:, 2]), raw_table(h[:, 4]))}
-            if f"ch{ch}_start" in master_tables and f"ch{ch}_stop" in master_tables:
-                tables["master"] = (master_tables[f"ch{ch}_start"], master_tables[f"ch{ch}_stop"])
+            if f"ch{ch}_start" in cal_tables and f"ch{ch}_stop" in cal_tables:
+                tables["calibrated"] = (cal_tables[f"ch{ch}_start"], cal_tables[f"ch{ch}_stop"])
             if settings.get("self"):
                 tables["self"] = (code_density(h[:, 2])[0], code_density(h[:, 4])[0])
             for v, (t_start, t_stop) in tables.items():
@@ -115,7 +116,7 @@ def analyse_point(run_dir, mv, channels, settings, master_tables):
                 bin_ps = CLOCK_PERIOD_PS / len(t_start) * (1 if v == "raw" else 1 / 3)
                 for k, val in tot_stats(tot, bin_ps, settings["short_ns"] * 1000).items():
                     row[f"{v}_{k}_ps" if k != "short_pct" else f"{v}_short_pct"] = round(val, 3)
-                if v == ("master" if "master" in tables else "raw"):
+                if v == ("calibrated" if "calibrated" in tables else "raw"):
                     tots[ch] = tot
         rows.append(row)
     return rows, tots
@@ -164,7 +165,7 @@ def make_plots(out, rows, all_tots, variant):
         for key, label in (("median", "ToT median"), ("mean", "ToT mean"), ("rms", "ToT RMS"),
                            ("sigma", "ToT fitted sigma"), ("fwhm", "ToT FWHM")):
             fig, ax = plt.subplots()
-            for v in ("raw", "master", "self"):
+            for v in ("raw", "calibrated", "self"):
                 y = [r.get(f"{v}_{key}_ps", math.nan) for r in rs]
                 if not all(isinstance(t, float) and math.isnan(t) for t in y):
                     ax.plot(mv, [t / 1000 for t in y], "o-", label=v)
@@ -192,7 +193,7 @@ def make_plots(out, rows, all_tots, variant):
                 ax.tick_params(labelsize=7)
             for ax in list(axes.flat)[len(tots):]:
                 ax.axis("off")
-            fig.suptitle(f"ch{ch}: ToT spectrum per threshold, ToT - median (ps), {variant} calibration")
+            fig.suptitle(f"ch{ch}: ToT spectrum per threshold, ToT - median (ps), {variant}")
             fig.tight_layout()
             fig.savefig(folder / "tot_spectra.png")
             plt.close(fig)
@@ -200,7 +201,7 @@ def make_plots(out, rows, all_tots, variant):
 
 # ---------------------------------------------------------------- main
 
-def analyse_scan(out, master_arg=None):
+def analyse_scan(out, cal_arg=None):
     settings = json.loads((out / "scan.json").read_text())
     channels = settings["channels"]
     points = sorted(int(p.name[4:]) for p in out.glob("thr_*") if (p / "hits.csv").exists())
@@ -210,20 +211,20 @@ def analyse_scan(out, master_arg=None):
     temps = [run_die_temp(read_run_info(out / f"thr_{mv:04d}")) for mv in points]
     temps = [t for t in temps if t is not None]
     temp = sum(temps) / len(temps) if temps else None
-    master_path, master_note = None, "none"
-    if master_arg and master_arg != "none":
-        master_path, master_note = Path(master_arg), master_arg
-    elif master_arg != "none":
+    cal_path, cal_note = None, "none (equal bins)"
+    if cal_arg and cal_arg != "none":
+        cal_path, cal_note = Path(cal_arg), cal_arg
+    elif cal_arg != "none":
         found = find_master(temp)
         if found:
-            master_path = found[0]
-            master_note = f"{found[0]} (made at {found[1]} C" + (
+            cal_path = found[0]
+            cal_note = f"master {found[0].name} (made at {found[1]} C" + (
                 f", scan {found[2]:+.1f} C from it)" if found[2] is not None else ")")
-    master_tables = load_cal(master_path) if master_path else {}
+    cal_tables = load_cal(cal_path) if cal_path else {}
 
     rows, all_tots = [], {}
     for mv in points:
-        r, tots = analyse_point(out / f"thr_{mv:04d}", mv, channels, settings, master_tables)
+        r, tots = analyse_point(out / f"thr_{mv:04d}", mv, channels, settings, cal_tables)
         rows += r
         all_tots[mv] = tots
 
@@ -235,15 +236,15 @@ def analyse_scan(out, master_arg=None):
         w.writeheader()
         w.writerows(rows)
 
-    variant = "master" if master_tables else "raw"
+    variant = "calibrated" if cal_tables else "raw"
     lines = [f"scan: {out}", f"channels: {channels}, thresholds {points[0]}..{points[-1]} mV "
              f"({len(points)} points), {settings['seconds']} s per point",
              f"die temperature: {'not read' if temp is None else f'{temp:.1f} C'}",
-             f"master calibration: {master_note}",
+             f"calibration: {cal_note}",
              f"short pulses: ToT < {settings['short_ns']} ns", ""]
     for ch in channels:
         rs = sorted((r for r in rows if r["channel"] == ch), key=lambda r: r["threshold_mv"])
-        lines.append(f"channel {ch} (ToT with the {variant} calibration):")
+        lines.append(f"channel {ch} (ToT {variant}):")
         lines.append(f"  {'mV':>5} {'hits':>9} {'rate/s':>11} {'short%':>7} {'median ns':>10} "
                      f"{'mean ns':>9} {'RMS ps':>9} {'p5 ns':>8} {'p95 ns':>8} {'overflow':>9}")
         for r in rs:
@@ -294,7 +295,7 @@ def main():
     ap.add_argument("--thresholds", help="explicit list instead, e.g. 30,50,80,120")
     ap.add_argument("-t", "--seconds", type=float, default=10, help="seconds per point (default 10)")
     ap.add_argument("-n", "--hits", type=int, help="stop a point after this many hits")
-    ap.add_argument("--master", help="master calibration file, or 'none' (default: nearest in calibrations/)")
+    ap.add_argument("--cal", help="calibration file, or 'none' (default: the nearest master in calibrations/)")
     ap.add_argument("--self", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--short-ns", type=float, default=2.0, help="ToT below this counts as short (default 2)")
     ap.add_argument("--also", help="other channels to set at every point, CH:MV,... (e.g. 2:150)")
@@ -306,7 +307,7 @@ def main():
     args = ap.parse_args()
 
     if args.analyse:
-        analyse_scan(Path(args.analyse), args.master)
+        analyse_scan(Path(args.analyse), args.cal)
         return
     if not args.host:
         ap.error("give the board address, or --analyse DIR")
@@ -341,7 +342,7 @@ def main():
     if args.no_analysis:
         print(f"\n[scan] done, not analysed: python threshold_scan.py --analyse {out}")
         return
-    analyse_scan(out, args.master)
+    analyse_scan(out, args.cal)
 
 
 if __name__ == "__main__":
