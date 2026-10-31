@@ -301,7 +301,8 @@ codes, larger = earlier.
     python sw/host/make_tot.py <run folder> [<run folder> ...] [--cal FILE|FOLDER|none]
 
 Writes `tot.csv` into each run folder: `channel, time_ns, tot_ns`, one row
-per hit, after a few `# key: value` header lines. `hits.csv` itself is always
+per hit in time order, all channels together, after a few `# key: value`
+header lines. `hits.csv` itself is always
 the raw data.
 
 The calibration is found by itself, the first of these that exists:

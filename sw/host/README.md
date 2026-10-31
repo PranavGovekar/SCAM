@@ -146,7 +146,8 @@ each), `scan.json`, `scan.csv`, `summary.txt`, and per channel
 
 **make_tot.py** writes `tot.csv` into each run folder: a few `# key: value`
 lines (run time, threshold, die temperature, calibration), then
-`channel,time_ns,tot_ns`, one row per hit. Scan points work too:
+`channel,time_ns,tot_ns`, one row per hit in time order, all channels
+together. Scan points work too:
 `make_tot.py data/<scan>/thr_*`.
 
 The calibration is found by itself, the first of these that exists:

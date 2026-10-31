@@ -31,9 +31,10 @@ tot.csv starts with a few "# key: value" lines that plot_tot.py reads:
     channel,time_ns,tot_ns
     0,0.0000,4.7270
 
-time_ns is the rising edge, counted from the clock cycle of the first hit of
-the run (so it can start just below 0). All channels share that zero, so
-times of different channels compare directly.
+Rows are in time order, all channels together. time_ns is the rising edge,
+counted from the clock cycle of the first hit of the run (so it can start just
+below 0). All channels share that zero, so times of different channels compare
+directly.
 """
 
 import argparse
@@ -81,6 +82,7 @@ def make_tot(run_dir, cal):
         rows.append(np.column_stack([h[:, 0], time, tot]))
         print(f"  ch{ch}: {len(h)} hits, mean ToT {tot.mean():.3f} ns")
     rows = np.concatenate(rows) if rows else np.zeros((0, 3))
+    rows = rows[np.argsort(rows[:, 1], kind="stable")]
     if seconds is None:
         print("  WARNING: run time unknown, rates cannot be computed")
     elif source != "run_seconds":
